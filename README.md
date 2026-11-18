@@ -751,9 +751,9 @@ root
 From the repo root:
 
 ```bash
-npm install
-npm test                 # strict typecheck + unit/integration + offline actual-CLI tests
-npm run test:tui         # isolated tmux acceptance, skips if tmux is unavailable
+bun install
+bun run test             # strict typecheck + unit/integration + offline actual-CLI tests
+bun run test:tui         # isolated tmux acceptance, skips if tmux is unavailable
 ```
 
 The CLI/TUI fixtures use a local scripted provider, not a live model. Set

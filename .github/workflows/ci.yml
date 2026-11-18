@@ -22,13 +22,16 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
-          cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       # Windows only: run the PTY e2e file directly (not via --test) so
       # per-test output streams live instead of being buffered until file
@@ -40,13 +43,13 @@ jobs:
         # pty-load first: the e2e file skips itself when PTY is unavailable,
         # so without the load assertion this diagnostic could "pass" by
         # skipping everything.
-        run: npx tsx tests/pty-load.test.ts && npx tsx tests/e2e-pty.test.ts
+        run: bunx tsx tests/pty-load.test.ts && bunx tsx tests/e2e-pty.test.ts
         timeout-minutes: 5
         env:
           EXPECT_PTY: "1"
 
       - name: Test
-        run: npm test
+        run: bun run test
         timeout-minutes: 10
         env:
           # All matrix platforms have node-pty prebuilds; a load failure

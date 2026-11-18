@@ -8,6 +8,9 @@ and tool reference, see [../README.md](../README.md).
 - **Node ≥ 22.19** (see `package.json` `engines`; we use `AbortSignal`,
   `fetch`, native ESM with `.ts` imports via
   [tsx](https://github.com/privatenumber/tsx)).
+- **Bun 1.4.2** — the pinned package manager (`packageManager` in
+  `package.json`). It installs dependencies and runs the dev scripts;
+  tests still spawn real `node` processes, so Node stays required.
 - **Linux, macOS, or Windows.** On Windows, Git Bash is strongly
   recommended (it's the default shell when on PATH; otherwise commands
   fall back to `powershell`). PTY mode uses ConPTY via the
@@ -23,7 +26,7 @@ Clone the repo and install dev dependencies:
 ```bash
 git clone https://github.com/iamwrm/pi-unified-exec
 cd pi-unified-exec
-npm install
+bun install
 ```
 
 To have pi load your working copy for interactive testing, either symlink it
@@ -47,8 +50,8 @@ to load. If installation fails, pipe mode (`tty: false`) still works and
 Verify the install:
 
 ```bash
-npm run check                       # clean strict typecheck
-npm test                            # typecheck + all tests
+bun run check                       # clean strict typecheck
+bun run test                        # typecheck + all tests
 ```
 
 You should see on the order of **250+** tests with `fail 0` (a few skipped on
@@ -84,9 +87,9 @@ sibling view, indexed by concern:
 ## Dev loop
 
 1. Edit files under `src/`.
-2. `npm run check` (catch type errors early).
-3. `npx tsx --test tests/<relevant>.test.ts` (fast inner loop).
-4. `npm test` before committing.
+2. `bun run check` (catch type errors early).
+3. `bunx tsx --test tests/<relevant>.test.ts` (fast inner loop).
+4. `bun run test` before committing.
 5. In a running pi: `/reload` to pick up changes.
 
 ### Important gotchas for the dev loop
@@ -128,32 +131,32 @@ pi -p --mode json --provider anthropic --model claude-sonnet-4 \
 
 ```bash
 # Pure units (fast, no subprocesses)
-npx tsx --test tests/head-tail-buffer.test.ts \
+bunx tsx --test tests/head-tail-buffer.test.ts \
                 tests/notify.test.ts \
                 tests/truncate.test.ts \
                 tests/unescape.test.ts \
                 tests/session-store.test.ts
 
 # End-to-end against real bash / cat (seconds)
-npx tsx --test tests/e2e.test.ts
-npx tsx --test tests/chars-encoding.test.ts
+bunx tsx --test tests/e2e.test.ts
+bunx tsx --test tests/chars-encoding.test.ts
 
 # PTY-backed (requires @homebridge/node-pty-prebuilt-multiarch to have loaded)
-npx tsx --test tests/e2e-pty.test.ts
+bunx tsx --test tests/e2e-pty.test.ts
 
 # Empty-poll duration policy, shared waits and wake delivery
-npx tsx --test tests/time.test.ts tests/long-wait.test.ts tests/wake-e2e.test.ts
+bunx tsx --test tests/time.test.ts tests/long-wait.test.ts tests/wake-e2e.test.ts
 
 # Actual Pi CLI with a local scripted provider; no model traffic
-npx tsx --test tests/cli-wait.test.ts
+bunx tsx --test tests/cli-wait.test.ts
 # Optionally set PI_UNIFIED_EXEC_TEST_CLI to another published dist/cli.js.
-npm run test:tui  # isolated tmux: waits/Esc plus codemode A/B/C, widths/themes/expansion
+bun run test:tui  # isolated tmux: waits/Esc plus codemode A/B/C, widths/themes/expansion
 
 # Short exec/input collection
-npx tsx --test tests/collect.test.ts
+bunx tsx --test tests/collect.test.ts
 
 # Native codemode display-only factory, renderer, opt-out and actual-CLI parity
-npx tsx --test tests/codemode-render.test.ts tests/codemode-cli.test.ts
+bunx tsx --test tests/codemode-render.test.ts tests/codemode-cli.test.ts
 ```
 
 ## Writing new tests
@@ -228,7 +231,7 @@ Pi's native codemode result renderer, default-on, without changing its executor,
 schema identity, loadout or persistence. It registers at the first
 `session_start`, never during loading: a load-time `codemode` makes Pi skip
 `builtin:codemode` and warn every user. Add or update the corresponding
-`tests/{render,codemode-render,codemode-cli}.test.ts`; run `npm run test:tui`
+`tests/{render,codemode-render,codemode-cli}.test.ts`; run `bun run test:tui`
 for actual CLI rendering. `PI_UNIFIED_EXEC_COMPACT_CODEMODE=0` opts out and
 leaves the still-loaded built-in in use.
 
@@ -339,9 +342,9 @@ step 3 to confirm.
 The surest test is to bump locally and let TypeScript tell us:
 
 ```bash
-npm install --save-dev @earendil-works/pi-coding-agent@<new-version> \
-                         @earendil-works/pi-tui@<new-version>
-npm run check
+bun add --dev @earendil-works/pi-coding-agent@<new-version> \
+             @earendil-works/pi-tui@<new-version>
+bun run check
 ```
 
 A clean typecheck means the API surface we import is unchanged. If it
@@ -355,7 +358,7 @@ grep -rn 'getActiveTools\|setActiveTools\|SessionShutdownEvent' \
 ### 4. Run the full test suite
 
 ```bash
-npm test
+bun run test
 ```
 
 `tests/e2e.test.ts` stubs `ExtensionAPI` ourselves, so a clean
@@ -385,10 +388,10 @@ zero.
 If steps 1–4 pass, bump both dev pins in `package.json` and commit:
 
 ```bash
-npm install --save-dev @earendil-works/pi-coding-agent@<new-version> \
-                         @earendil-works/pi-tui@<new-version>
-npm test
-git add package.json package-lock.json Changelog.md
+bun add --dev @earendil-works/pi-coding-agent@<new-version> \
+             @earendil-works/pi-tui@<new-version>
+bun run test
+git add package.json bun.lock Changelog.md
 git commit -m "unified-exec: verify compat with pi-coding-agent <new-version>"
 ```
 
@@ -432,17 +435,21 @@ as appropriate for semver.
 
 ### What CI does on tag push
 
-1. `npm ci` — reproducible install from `package-lock.json`
-2. `npm test` — strict typecheck + full test suite
-4. **Version-vs-tag guard**: fails CI if `package.json` version doesn't
+1. `bun install --frozen-lockfile` — reproducible install from `bun.lock`
+2. `bun run test` — strict typecheck + full test suite
+3. **Version-vs-tag guard**: fails CI if `package.json` version doesn't
    match the git tag. Catches the "forgot to bump" footgun.
    `npm version` does both atomically so this normally passes.
-5. `npm publish --provenance` — publishes the tarball.
+4. `npm publish --provenance` — publishes the tarball.
+
+The publish step is the one place that stays on the npm CLI: `bun publish`
+does not implement npm's OIDC token exchange, so it cannot publish through
+Trusted Publisher.
 
 Tarball contents are controlled by `files` in `package.json`:
 `src/`, `README.md`, `LICENSE`. Tests, `local_data/`, `tsconfig.json`,
 `.github/`, `AGENTS.md` are all excluded. Verify with
-`npm pack --dry-run`.
+`bun pm pack --dry-run`.
 
 ### Troubleshooting
 

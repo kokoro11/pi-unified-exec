@@ -4,6 +4,9 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Development, CI and the repo install path now run on bun. `bun.lock` replaces `package-lock.json`, `package.json` pins `packageManager: bun@1.4.2` and lists `@homebridge/node-pty-prebuilt-multiarch` in `trustedDependencies`, because bun skips the install scripts of untrusted packages and the bundled PTY prebuilds would otherwise never be wired up. Scripts lose their package-manager coupling (`test` calls `tsc --noEmit` directly); the CI matrix keeps Node 22/24 because the tests spawn real `node` processes.
+- The publish workflow installs and tests with bun but still publishes with the npm CLI, since `bun publish` does not perform npm's OIDC token exchange and Trusted Publisher needs npm 11.
+- Verified on Windows: `bun install --frozen-lockfile` reports no changes, `bun run test` passes 366 with one skip, `bun pm pack --dry-run` ships the same 22 files. No npm publication.
 - `exec_command` and `write_stdin` now return `{ details, text }` in codemode. Use `r.details` for structured fields such as `exit_code` and `session_id`, or call `text(r.text)` directly to display the formatted reply.
 - Update `@homebridge/node-pty-prebuilt-multiarch` to 0.15.0. The npm package now bundles its prebuilt binaries, including Windows ConPTY. Windows PTY sessions handle the asynchronous connection, including early termination, live PID reporting, and stdin for commands that wait for input before producing output.
 

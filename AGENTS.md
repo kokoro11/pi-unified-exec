@@ -7,12 +7,12 @@ Before changing long-wait/wake behavior, read `docs/IV-0001-long-wait-and-wake-c
 On Pi upgrades, also requalify `src/codemode-render.ts`: public native factory,
 schema identity/MCP activation, default inactivity, mode/budget/loadout,
 store/model helpers, and cached `lastComponent` unwrapping. Run the codemode
-unit/CLI tests and `npm run test:tui`; renderer fallback must not mask failures.
+unit/CLI tests and `bun run test:tui`; renderer fallback must not mask failures.
 
 Canonical verification:
 
 ```bash
-npm test
+bun run test
 ```
 
 If you want to inspect pi-mono's source code, git clone https://github.com/earendil-works/pi (formerly badlogic/pi-mono; old URL redirects) to ./local_data/pi-mono
