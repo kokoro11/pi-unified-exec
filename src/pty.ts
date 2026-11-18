@@ -8,6 +8,7 @@
 
 import { spawn as cpSpawn, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
+import type { Socket } from "node:net";
 import { constants as osConstants } from "node:os";
 
 import { IS_WINDOWS, resolveBinary } from "./shell.ts";
@@ -78,6 +79,7 @@ type PtyModule = {
 
 type PtyProcess = {
 	pid: number;
+	_agent?: { inSocket: Socket; outSocket: Socket };
 	onData: (cb: (data: string | Buffer) => void) => { dispose: () => void };
 	onExit: (cb: (e: { exitCode: number; signal?: number }) => void) => { dispose: () => void };
 	write: (data: string | Buffer) => void;
@@ -87,7 +89,7 @@ type PtyProcess = {
 
 /**
  * PTY provider package. The @homebridge fork of node-pty-prebuilt-multiarch
- * ships win32 prebuilds (conpty/winpty) in addition to linux/macOS. Loaded
+ * ships Windows ConPTY prebuilds in addition to Linux and macOS. Loaded
  * strictly by this name — no fallback to the old package: Node's require
  * walks ancestor node_modules, so a fallback name could load an unaudited
  * native module planted in an enclosing project.
@@ -228,10 +230,15 @@ function spawnPty(mod: PtyModule, opts: SpawnOptions): SpawnedChild {
 		name: "xterm-256color",
 	});
 
+	const conpty = IS_WINDOWS ? child._agent : undefined;
+	const conptyInput = conpty?.inSocket;
+	// As with piped stdin, the child can close the handle during a write.
+	conptyInput?.on("error", () => {});
 	const dataHandlers = new Set<(chunk: Uint8Array) => void>();
 	const exitHandlers = new Set<ExitCallback>();
 	let exited = false;
 	let processExited = false;
+	let windowsKillPending = false;
 
 	const dataSub = child.onData((data) => {
 		const chunk = typeof data === "string" ? new TextEncoder().encode(data) : new Uint8Array(data);
@@ -263,7 +270,9 @@ function spawnPty(mod: PtyModule, opts: SpawnOptions): SpawnedChild {
 	});
 
 	return {
-		pid: child.pid,
+		get pid() {
+			return child.pid || undefined;
+		},
 		tty: true,
 		get processExited() {
 			return processExited;
@@ -271,7 +280,15 @@ function spawnPty(mod: PtyModule, opts: SpawnOptions): SpawnedChild {
 		write(data) {
 			if (exited) return false;
 			try {
-				child.write(Buffer.from(data));
+				const bytes = Buffer.from(data);
+				if (conptyInput) {
+					// node-pty 0.15 waits for output before forwarding write().
+					// The input pipe is already open, including for quiet children.
+					if (!conptyInput.writable) return false;
+					conptyInput.write(bytes);
+				} else {
+					child.write(bytes);
+				}
 				return true;
 			} catch {
 				return false;
@@ -288,11 +305,16 @@ function spawnPty(mod: PtyModule, opts: SpawnOptions): SpawnedChild {
 		kill(signal = "SIGTERM") {
 			if (exited) return;
 			if (IS_WINDOWS) {
-				// Avoid WindowsTerminal.kill(): it throws when passed a signal
-				// name and its console-process-list helper crashes if the child
-				// is already gone. taskkill the tree instead; node-pty's exit
-				// event then fires and disposeWindowsConpty releases resources.
-				killWindowsTree(child.pid);
+				// Use taskkill to terminate the shell and its descendants.
+				if (child.pid > 0) {
+					killWindowsTree(child.pid);
+				} else if (conpty && !windowsKillPending) {
+					// ConPTY publishes the real PID when its output pipe connects.
+					windowsKillPending = true;
+					conpty.outSocket.once("ready_datapipe", () => {
+						if (!exited && child.pid > 0) killWindowsTree(child.pid);
+					});
+				}
 				return;
 			}
 			try {

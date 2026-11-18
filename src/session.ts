@@ -53,7 +53,6 @@ export class ExecSession {
 	readonly displayCommand: string;
 	readonly cwd: string;
 	readonly startedAt: number;
-	readonly pid: number | undefined;
 	/** Path to a log file that receives the full stdout+stderr stream. */
 	readonly logPath: string;
 	private logStream: WriteStream | undefined;
@@ -86,6 +85,10 @@ export class ExecSession {
 	private lastUsedAt: number;
 	private child!: SpawnedChild;
 
+	get pid(): number | undefined {
+		return this.child?.pid;
+	}
+
 	private constructor(id: number, opts: SessionSpawnOptions) {
 		this.id = id;
 		this.command = opts.command;
@@ -96,7 +99,6 @@ export class ExecSession {
 		this.lastUsedAt = this.startedAt;
 		this.outputBuffer = new HeadTailBuffer(opts.headTailMaxBytes ?? DEFAULT_HEAD_TAIL_MAX_BYTES);
 		this.streamTailCap = opts.streamTailBytes ?? DEFAULT_STREAM_TAIL_BYTES;
-		this.pid = undefined; // set in `start`
 		this.logPath = join(tmpdir(), `pi-unified-exec-${id}-${randomBytes(4).toString("hex")}.log`);
 	}
 
@@ -143,9 +145,6 @@ export class ExecSession {
 			self.outputClosed.close();
 			return self;
 		}
-
-		// child's actual pid
-		Object.defineProperty(self, "pid", { value: self.child.pid, enumerable: true });
 
 		self.child.onData((chunk) => {
 			self.totalOutputBytes += chunk.length;

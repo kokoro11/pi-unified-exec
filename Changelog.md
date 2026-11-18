@@ -5,6 +5,7 @@ All notable changes to this project. **Newest entries go on top.**
 ## Unreleased
 
 - `exec_command` and `write_stdin` now return `{ details, text }` in codemode. Use `r.details` for structured fields such as `exit_code` and `session_id`, or call `text(r.text)` directly to display the formatted reply.
+- Update `@homebridge/node-pty-prebuilt-multiarch` to 0.15.0. The npm package now bundles its prebuilt binaries, including Windows ConPTY. Windows PTY sessions handle the asynchronous connection, including early termination, live PID reporting, and stdin for commands that wait for input before producing output.
 
 ## 0.13.1 - 2026-10-08
 

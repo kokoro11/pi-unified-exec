@@ -39,10 +39,10 @@ or install directly from the local path (writes into pi's settings):
 pi install -l ./path/to/pi-unified-exec
 ```
 
-`npm install` fetches `@homebridge/node-pty-prebuilt-multiarch` prebuilds. If your
-platform has no prebuild the optional dep fails silently — pipe mode
-(`tty: false`) still works; only `tty: true` will error with a clear
-message at call time.
+`@homebridge/node-pty-prebuilt-multiarch` bundles prebuilds in its npm package
+and falls back to a local build when the bundled binary is missing or fails
+to load. If installation fails, pipe mode (`tty: false`) still works and
+`tty: true` reports the load error at call time.
 
 Verify the install:
 

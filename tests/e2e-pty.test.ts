@@ -7,7 +7,7 @@ import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
 import { describe, it } from "node:test";
 import extensionFactory from "../src/index.ts";
-import { isPtyAvailable } from "../src/pty.ts";
+import { isPtyAvailable, spawnChild } from "../src/pty.ts";
 import { IS_WINDOWS } from "../src/shell.ts";
 
 // Process-tool harness: the fake API has no codemode surfaces (see codemode-render tests).
@@ -153,6 +153,10 @@ describe("unified-exec PTY mode", { skip: !isPtyAvailable() }, () => {
 			}
 			assert.ok(output.includes("GOT:hello|"), `PTY input did not round-trip: ${JSON.stringify(output)}`);
 
+			const listed = await h.call("list_sessions", {});
+			const live = listed.details.sessions.find((session: { session_id: number }) => session.session_id === sid);
+			assert.ok(live?.pid > 0, `connected PTY has no process ID: ${JSON.stringify(live)}`);
+
 			const r3 = await h.call("write_stdin", { session_id: sid, chars: "quit\r", yield_time_ms: 3000 });
 			let exitCode = r3.details.exit_code;
 			if (r3.details.session_id !== undefined) {
@@ -185,6 +189,18 @@ describe("unified-exec PTY mode", { skip: !isPtyAvailable() }, () => {
 		} finally {
 			await h.emit("session_shutdown");
 		}
+	});
+
+	it("Windows: a kill requested before ConPTY connects terminates the process", { skip: !IS_WINDOWS, timeout: 10000 }, async () => {
+		const child = spawnChild({
+			command: [process.execPath, "-e", "setTimeout(() => {}, 3000)"],
+			cwd: process.cwd(),
+			env: process.env,
+			tty: true,
+		});
+		const exited = new Promise<number | null>((resolve) => child.onExit(resolve));
+		child.kill();
+		assert.equal(await exited, 1);
 	});
 
 	it("Ctrl-C (\\x03) interrupts a PTY loop", async () => {

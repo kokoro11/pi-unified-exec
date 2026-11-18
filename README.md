@@ -91,10 +91,10 @@ pi install -l npm:pi-unified-exec         # project-local (.pi/settings.json)
 ```
 
 `pi install` runs `npm install` under the hood, which fetches
-`@homebridge/node-pty-prebuilt-multiarch` (prebuilt binaries for
-linux/macOS/Windows — no compilation). If the install fails on your
-platform, pipe mode (`tty: false`) still works, but PTY mode (`tty: true`)
-will error with a clear message.
+`@homebridge/node-pty-prebuilt-multiarch`. The package bundles prebuilt
+binaries for Linux, macOS, and Windows. If the optional dependency fails
+to install, pipe mode (`tty: false`) still works and PTY mode (`tty: true`)
+reports the load error.
 
 To try without installing:
 
@@ -910,12 +910,6 @@ Supported — both pipes and PTY mode:
   (access denied, protected process), `kill_session` says so and the session
   stays registered for retry — it is never silently dropped while the
   process lives.
-- **Supply-chain note (PTY prebuilds).** npm's lockfile integrity covers the
-  `@homebridge/node-pty-prebuilt-multiarch` JS payload, but the native
-  ConPTY binary is fetched at install time by `prebuild-install` from the
-  package's GitHub releases (TLS, homebridge org) — those bytes are not
-  covered by an npm digest. The dependency is pinned exactly; if your threat
-  model requires more, vendor the prebuild or build node-pty from source.
 - Ctrl-C injection (`write_stdin chars="\x03"`) works in PTY mode — ConPTY
   translates it into a real console interrupt. In pipe mode it's just a byte,
   as on every platform.
