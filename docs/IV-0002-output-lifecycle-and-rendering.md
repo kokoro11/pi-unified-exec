@@ -25,12 +25,11 @@ The initiative establishes a durable output contract across these layers:
    a recovery path.
 3. **TUI:** the bounded result is collapsed to five visual lines by default and
    expands through Pi's configured `app.tools.expand` binding.
-4. **Scripts (0.12.0):** Pi codemode scripts receive `structuredContent`
-   matching each tool's `outputSchema`, whose `output` is the same bounded,
-   terminal-inert tail with real newlines. Without it, scripts received the
-   whole text envelope as one string. Printing that string inside an object
-   collapsed it to one escaped logical line, which Pi's logical-line codemode
-   preview could not bound.
+4. **Scripts:** Pi codemode scripts receive `structuredContent` matching each
+   tool's `outputSchema`. For `exec_command` and `write_stdin`, use `r.details`
+   for typed fields and `text(r.text)` to display the formatted reply.
+   `r.details.output` carries the bounded, terminal-inert tail with real
+   newlines.
 5. **Codemode presentation (0.12.1):** by default register Pi's native codemode
    definition with a result-renderer-only decorator. Compact JSON from
    `text(r)` / settled results flooded Pi 0.99.1's logical-line previews.
@@ -82,7 +81,7 @@ The initiative establishes a durable output contract across these layers:
 | Tool-specific render entry points over generic fallback | Kill/list semantics differ from process yields; explicit renderers prevent identity from being mistaken for liveness. |
 | Expand only bounded output | Rendering or reading an unlimited multi-gigabyte log from a synchronous tool row is unsafe. |
 | Make result text terminal-inert; preserve raw logs | PTY output can contain clipboard, alternate-screen, keyboard-mode, and cursor controls. Models need text, not executable terminal state; forensic bytes remain recoverable by path. |
-| Project script results from details, not a second serializer | `structuredContent` inherits the bounds and terminal safety of `details.output`; metadata strings reuse `safeMeta`. Model `content` stays byte-identical. |
+| Project script results from tool details and reuse the formatted reply | `structuredContent` inherits the bounds and terminal safety of `details.output`. The process tools share the same formatted text between `structuredContent.text` and model `content`. |
 | Require Pi 0.99.1 for 0.12.0 | `outputSchema`/`structuredContent` do not exist in earlier Pi types. Older Pi users stay on 0.11.x. |
 | Keep complete logs for now | Archive bounding/retention is a separate policy change and remains follow-up work. |
 | Bundle the native codemode display fix by default in 0.12.1 | Owner requested the fix here, not a separate package. It applies globally to nested tools while unified-exec is loaded; no Pi core patch or executor fork. |

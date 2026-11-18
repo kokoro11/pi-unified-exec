@@ -2,6 +2,10 @@
 
 All notable changes to this project. **Newest entries go on top.**
 
+## Unreleased
+
+- `exec_command` and `write_stdin` now return `{ details, text }` in codemode. Use `r.details` for structured fields such as `exit_code` and `session_id`, or call `text(r.text)` directly to display the formatted reply.
+
 ## 0.13.1 - 2026-10-08
 
 - Sharpen the two model-facing steer texts. `STEER_NOTE` now says the process was **not interrupted** (the `interrupted_by_steer` enum name alone can read as if the child was signaled), that output keeps buffering so the next poll returns everything produced since, and that re-attaching with `on_exit: "wake"` is the no-polling alternative. `STEER_NESTED_ERROR` now explicitly forbids retrying the stopped script call — end the polling loop and read the steer — and adds the same buffering reassurance. Both keep the `steering message` phrasing the tests match on.

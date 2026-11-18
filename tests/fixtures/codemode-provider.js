@@ -9,7 +9,7 @@ const exec = `await tools.exec_command({cmd: ${JSON.stringify(command)}, yield_t
 const scripts = {
 	A: [`const r = ${exec};\ntext(r);`],
 	B: [`const s = await Promise.allSettled([${exec}]);\ntext({i: 0, ...s[0]});`],
-	C: [`const r = ${exec};\ntext(\`exit \${r.exit_code}\`);\ntext(r.output);`],
+	C: [`const r = ${exec};\ntext(r.text);`],
 	spill: ['// @options: {"max_output_tokens": 100}\nconst r = await tools.sample({}); text(r);'],
 	parity: [
 		'const r = await tools.sample({}); store("probe", r); text(r);',

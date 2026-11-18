@@ -398,26 +398,27 @@ active set at session start so the LLM is steered toward `exec_command` /
 
 ## Codemode scripts
 
-Every tool declares an `outputSchema` and returns a matching
-`structuredContent`, so Pi codemode scripts receive an object instead of the
-text envelope the model sees:
+In Pi codemode, `exec_command` and `write_stdin` return `{ details, text }`.
+If you only need to see the result, call `text(r.text)` directly. It prints
+the formatted tool reply with status, output, and any log or truncation
+information, preserving line breaks.
 
 ```js
-const r = await tools.exec_command({ cmd: "npm test", yield_time_ms: 30000 });
-if (r.running) text(`still running as session ${r.session_id}`);
-else text(`exit ${r.exit_code}`);
-text(r.output); // readable multiline output rather than the whole JSON object
+const r = await tools.exec_command({ cmd: "git status --short" });
+text(r.text);
 ```
 
-`exec_command` and `write_stdin` resolve to `{ status, running, output,
-truncated, session_id?, exit_code?, signal?, failure_message?, log_path?,
-wall_time_seconds, note?, wait_status?, on_exit?, tool_time_utc? }`;
-`kill_session`, `set_on_exit`, and `list_sessions` have matching typed shapes
-(`src/script-result.ts`). `output` is the same bounded, terminal-inert tail as
-`details.output`. Print `r.output` rather than the whole object: `text(r)`
-serializes newlines as `\n` and turns the output into one long line.
+Use `r.details` when the script needs structured fields such as `running`,
+`session_id`, `exit_code`, or `log_path`. `r.details.output` is the bounded,
+terminal-safe tail of the child process output.
 
-Model-visible `content` and persisted `details` are unchanged.
+```js
+const r = await tools.exec_command({ cmd: "git diff --exit-code" });
+if (r.details.exit_code === 1) text(r.details.output);
+```
+
+`kill_session`, `set_on_exit`, and `list_sessions` return their typed fields
+directly. See [the tool result schemas](src/script-result.ts).
 
 ### Default-on codemode display fix (0.12.1; warning-free since 0.12.2)
 

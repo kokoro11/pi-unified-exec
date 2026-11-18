@@ -74,7 +74,6 @@ import {
 	finalizeKillResult,
 	finalizeProcessResult,
 	renderKillResultText,
-	renderProcessResultText,
 	type FinalizeProcessInput,
 	type ProcessResultDetails,
 } from "./tool-result.ts";
@@ -99,6 +98,9 @@ const MAX_PTY_ROWS = 300;
 // Long empty polls use output-driven updates, never a periodic heartbeat.
 const LONG_WAIT_UPDATE_INTERVAL_MS = 30_000;
 const SESSION_UI_KEY = "unified-exec.sessions";
+
+const PROCESS_CODEMODE_GUIDANCE =
+	"In codemode, use r.details for structured data such as exit_code and session_id. To display the result, call text(r.text) directly.";
 
 /**
  * Google-compatible string enum schema (plain `type: "string"` + `enum`,
@@ -1114,7 +1116,8 @@ export default function (pi: ExtensionAPI) {
 		name: "exec_command",
 		label: "exec_command",
 		description:
-			'Run a command in a persistent session. Returns `session_id` if still running (drive with write_stdin) or `exit_code` if it finished within yield_time_ms. on_exit defaults to "none". Only pass on_exit: "wake" when the human explicitly wants auto-resume on unobserved exit — stale wakes interrupt later work. Use set_on_exit to disarm or re-arm a running session.',
+			'Run a command in a persistent session. Returns `session_id` if still running (drive with write_stdin) or `exit_code` if it finished within yield_time_ms. on_exit defaults to "none". Only pass on_exit: "wake" when the human explicitly wants auto-resume on unobserved exit — stale wakes interrupt later work. Use set_on_exit to disarm or re-arm a running session. ' +
+			PROCESS_CODEMODE_GUIDANCE,
 		promptSnippet: "Run a shell command; long-running ones yield a session_id",
 		promptGuidelines: [
 			"Prefer dedicated file tools when available (read/grep/find/ls). Otherwise use exec_command with fast shell tools: rg for content search, fd if available (or find) for file names, and ls for directories.",
@@ -1122,7 +1125,6 @@ export default function (pi: ExtensionAPI) {
 			"For a long non-interactive command, start with a short yield to obtain a session_id, then use an empty write_stdin poll with a finite yield_time_ms suited to its expected duration. There is no built-in empty-poll maximum; an operator may configure one. Keep waits short for interactive or indefinite processes. Pi manages cache warming independently.",
 			'on_exit defaults to "none". Prefer polling or human follow-up. Use on_exit: "wake" ONLY when the human explicitly wants auto-resume on unobserved completion — not for indefinite processes (dev servers, watchers). If you armed wake by mistake or the job is wrong/abandoned, call set_on_exit(session_id, on_exit: "none") promptly (does not kill the process). kill_session still kills and suppresses wake. Combining wake with an observing write_stdin is safe: direct completion consumes the wake.',
 			'A wait with wait_status "interrupted_by_steer" ended early because the user sent a steering message; the process is still running. Address the steer first and re-poll only if it is still relevant.',
-			"In codemode scripts, exec_command and write_stdin resolve to objects: print r.output with text(r.output) and check r.exit_code / r.session_id, instead of printing the whole result object.",
 		],
 		outputSchema: processScriptResultSchema,
 		parameters: Type.Object({
@@ -1162,10 +1164,11 @@ export default function (pi: ExtensionAPI) {
 			const steerSignal = steerSignalFor(ctx, toolCallId, eventCtx);
 			const shape = await runExecCommand(ctx, params, signal, steerSignal, onUpdate, eventCtx.cwd);
 			updateRunningSessionsUi(ctx);
+			const structuredContent = processScriptResult(shape);
 			return {
-				content: [{ type: "text", text: renderProcessResultText(shape) }],
+				content: [{ type: "text", text: structuredContent.text }],
 				details: shape,
-				structuredContent: processScriptResult(shape),
+				structuredContent,
 			};
 		},
 		renderCall: renderExecCommandCall,
@@ -1176,7 +1179,8 @@ export default function (pi: ExtensionAPI) {
 		name: "write_stdin",
 		label: "write_stdin",
 		description:
-			"Write bytes to a running session. Omit both chars and chars_b64 to poll without writing. Use `chars` for text with C-style escapes (e.g. \\x03 Ctrl-C, \\x1b ESC, \\n newline); use `chars_b64` for raw binary. For empty polls, wait with a finite yield_time_ms (relative, no built-in maximum) or yield_until (absolute UTC deadline, only when the human explicitly asks).",
+			"Write bytes to a running session. Omit both chars and chars_b64 to poll without writing. Use `chars` for text with C-style escapes (e.g. \\x03 Ctrl-C, \\x1b ESC, \\n newline); use `chars_b64` for raw binary. For empty polls, wait with a finite yield_time_ms (relative, no built-in maximum) or yield_until (absolute UTC deadline, only when the human explicitly asks). " +
+			PROCESS_CODEMODE_GUIDANCE,
 		promptSnippet: "Send input to or poll a running session",
 		promptGuidelines: [
 			"Empty write_stdin polls default to 5 seconds and accept finite yield_time_ms durations with no built-in maximum. Choose a wait based on expected job duration and needed responsiveness, not cache lifetime. Exit or cancellation returns early; cancellation leaves the process alive. Respect any configured operator limit.",
@@ -1217,10 +1221,11 @@ export default function (pi: ExtensionAPI) {
 			const steerSignal = steerSignalFor(ctx, toolCallId, eventCtx);
 			const shape = await runWriteStdin(ctx, params, signal, steerSignal, onUpdate, toolCallId);
 			updateRunningSessionsUi(ctx);
+			const structuredContent = processScriptResult(shape);
 			return {
-				content: [{ type: "text", text: renderProcessResultText(shape) }],
+				content: [{ type: "text", text: structuredContent.text }],
 				details: shape,
-				structuredContent: processScriptResult(shape),
+				structuredContent,
 			};
 		},
 		renderCall: renderWriteStdinCall,

@@ -1,23 +1,14 @@
 /**
  * Script-facing results for Pi codemode.
  *
- * Pi 0.99 codemode hands a nested tool call's `structuredContent` to the script
- * when the tool declares an `outputSchema`; otherwise the script receives the
- * whole text envelope as one string. Printing that string inside an object
- * (`text({ ...r })`) serializes every newline as `\n`, producing one logical
- * line that codemode's five-line collapsed preview cannot bound.
- *
- * These projections give scripts `output` as a real multi-line string plus
- * typed state (`exit_code`, `session_id`, …). They derive only from the
- * already-bounded, sanitized result details, so they add no new size or
- * terminal-safety surface. Model-visible `content` and persisted `details`
- * are unchanged.
+ * For exec_command and write_stdin, `text` is the formatted tool reply and
+ * `details` holds typed state and the bounded, sanitized output tail.
  */
 
 import { Type, type Static } from "typebox";
 
 import type { OnExitPolicy } from "./completion.ts";
-import { type KillResultDetails, type ProcessResultDetails, safeMeta } from "./tool-result.ts";
+import { type KillResultDetails, type ProcessResultDetails, renderProcessResultText, safeMeta } from "./tool-result.ts";
 
 const optionalMeta = (value: string | undefined): string | undefined => (value ? safeMeta(value) : undefined);
 
@@ -29,8 +20,7 @@ function compact<T extends Record<string, unknown>>(value: T): T {
 
 const outputFields = {
 	output: Type.String({
-		description:
-			"Bounded, terminal-safe tail of the child output with real newlines. Print it with text(r.output) rather than printing the whole result object.",
+		description: "Bounded, terminal-safe tail of the child output with real newlines.",
 	}),
 	truncated: Type.Boolean({ description: "True when earlier output was dropped; the full stream is in log_path." }),
 	omitted_bytes: Type.Optional(Type.Number({ description: "Middle bytes dropped by the in-memory retention cap." })),
@@ -41,7 +31,7 @@ const outputFields = {
 	wall_time_seconds: Type.Number(),
 };
 
-export const processScriptResultSchema = Type.Object({
+const processScriptDetailsSchema = Type.Object({
 	status: Type.Union([Type.Literal("running"), Type.Literal("exited")]),
 	running: Type.Boolean(),
 	session_id: Type.Optional(
@@ -53,26 +43,34 @@ export const processScriptResultSchema = Type.Object({
 	on_exit: Type.Optional(Type.Union([Type.Literal("none"), Type.Literal("wake")])),
 	tool_time_utc: Type.Optional(Type.String({ description: "Host UTC time, for computing yield_until deadlines." })),
 });
+
+export const processScriptResultSchema = Type.Object({
+	details: processScriptDetailsSchema,
+	text: Type.String({ description: "Formatted tool reply with process status and output." }),
+});
 export type ProcessScriptResult = Static<typeof processScriptResultSchema>;
 
 export function processScriptResult(shape: ProcessResultDetails): ProcessScriptResult {
-	return compact({
-		status: shape.status,
-		running: shape.running,
-		session_id: shape.session_id,
-		output: shape.output,
-		truncated: shape.truncation?.truncated === true,
-		omitted_bytes: shape.omitted_bytes || undefined,
-		exit_code: shape.exit_code,
-		signal: optionalMeta(shape.signal),
-		failure_message: optionalMeta(shape.failure_message),
-		log_path: optionalMeta(shape.log_path),
-		wall_time_seconds: shape.wall_time_seconds,
-		note: optionalMeta(shape.note),
-		wait_status: shape.wait_status,
-		on_exit: shape.on_exit,
-		tool_time_utc: shape.tool_time_utc,
-	});
+	return {
+		details: compact({
+			status: shape.status,
+			running: shape.running,
+			session_id: shape.session_id,
+			output: shape.output,
+			truncated: shape.truncation?.truncated === true,
+			omitted_bytes: shape.omitted_bytes || undefined,
+			exit_code: shape.exit_code,
+			signal: optionalMeta(shape.signal),
+			failure_message: optionalMeta(shape.failure_message),
+			log_path: optionalMeta(shape.log_path),
+			wall_time_seconds: shape.wall_time_seconds,
+			note: optionalMeta(shape.note),
+			wait_status: shape.wait_status,
+			on_exit: shape.on_exit,
+			tool_time_utc: shape.tool_time_utc,
+		}),
+		text: renderProcessResultText(shape),
+	};
 }
 
 export const killScriptResultSchema = Type.Object({

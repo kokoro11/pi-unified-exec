@@ -1,7 +1,5 @@
 /**
- * Codemode script-facing results: every tool declares an `outputSchema` and
- * returns a matching `structuredContent`, so codemode scripts receive
- * `output` as a real multi-line string instead of the whole text envelope.
+ * Codemode script-facing results and their registered output schemas.
  */
 
 import { strict as assert } from "node:assert";
@@ -78,44 +76,47 @@ describe("script result projections", () => {
 		const value = processScriptResult(details);
 		assert.ok(Value.Check(processScriptResultSchema, value));
 		assertPlainJson(value);
-		assert.equal(value.status, "exited");
-		assert.equal(value.running, false);
-		assert.equal(value.exit_code, 0);
-		assert.equal(value.output, "hello\nworld\n");
-		assert.equal(value.truncated, false);
-		assert.equal(value.session_id, undefined);
+		assert.equal(value.details.status, "exited");
+		assert.equal(value.details.running, false);
+		assert.equal(value.details.exit_code, 0);
+		assert.equal(value.details.output, "hello\nworld\n");
+		assert.equal(value.details.truncated, false);
+		assert.equal(value.details.session_id, undefined);
+		assert.equal(value.text, renderProcessResultText(details));
 	});
 
 	it("running process exposes session_id; non-zero exit and signal are typed", () => {
 		const running = processScriptResult(finalizeProcessResult(processInput({ sessionId: 3, exitCode: undefined })));
 		assert.ok(Value.Check(processScriptResultSchema, running));
-		assert.equal(running.status, "running");
-		assert.equal(running.session_id, 3);
-		assert.equal(running.exit_code, undefined);
+		assert.equal(running.details.status, "running");
+		assert.equal(running.details.session_id, 3);
+		assert.equal(running.details.exit_code, undefined);
 
 		const failed = processScriptResult(
 			finalizeProcessResult(processInput({ exitCode: 2, signal: "SIGTERM", failure: "boom\nsecond line" })),
 		);
 		assert.ok(Value.Check(processScriptResultSchema, failed));
-		assert.equal(failed.exit_code, 2);
-		assert.equal(failed.signal, "SIGTERM");
-		assert.equal(failed.failure_message, "boom second line", "metadata stays single-line and bounded");
+		assert.equal(failed.details.exit_code, 2);
+		assert.equal(failed.details.signal, "SIGTERM");
+		assert.equal(failed.details.failure_message, "boom second line", "metadata stays single-line and bounded");
 	});
 
 	it("truncated output stays within Pi's byte cap and is flagged", () => {
 		const big = "x".repeat(DEFAULT_MAX_BYTES * 2);
 		const value = processScriptResult(finalizeProcessResult(processInput({ collected: encoder.encode(big) })));
 		assert.ok(Value.Check(processScriptResultSchema, value));
-		assert.equal(value.truncated, true);
-		assert.ok(Buffer.byteLength(value.output) <= DEFAULT_MAX_BYTES);
+		assert.equal(value.details.truncated, true);
+		assert.ok(Buffer.byteLength(value.details.output) <= DEFAULT_MAX_BYTES);
+		assert.match(value.text, /\[Showing .+Full output: \/tmp\/session\.log\]/);
 	});
 
 	it("terminal control sequences never reach script output", () => {
 		const value = processScriptResult(
 			finalizeProcessResult(processInput({ collected: encoder.encode("\u001b[31mred\u001b[0m\u0007 ok\n") })),
 		);
-		assert.doesNotMatch(value.output, /\u001b|\u0007/);
-		assert.match(value.output, /red ok/);
+		assert.doesNotMatch(value.details.output, /\u001b|\u0007/);
+		assert.match(value.details.output, /red ok/);
+		assert.doesNotMatch(value.text, /\u001b|\u0007/);
 	});
 
 	it("kill results, including failed and unknown sessions, match the kill schema", () => {
@@ -148,7 +149,7 @@ describe("script result projections", () => {
 	});
 });
 
-describe("registered tools return structuredContent", { skip: IS_WINDOWS }, () => {
+describe("registered tools return structuredContent", () => {
 	it("every tool declares an outputSchema", () => {
 		const { tools } = makeHarness();
 		for (const name of ["exec_command", "write_stdin", "kill_session", "list_sessions", "set_on_exit"]) {
@@ -156,27 +157,39 @@ describe("registered tools return structuredContent", { skip: IS_WINDOWS }, () =
 		}
 	});
 
-	it("exec_command keeps model content unchanged and mirrors details.output", async () => {
-		const { call } = makeHarness();
-		const result = await call("exec_command", { cmd: "printf 'a\\nb\\n'; exit 3", yield_time_ms: 5000 });
+	it("exec_command exposes the same formatted reply and bounded output to scripts", async () => {
+		const { call, tools } = makeHarness();
+		const result = await call("exec_command", {
+			cmd: `node -e "console.log('a'); console.log('b'); process.exitCode = 3"`,
+			shell: IS_WINDOWS ? "cmd" : "bash",
+			yield_time_ms: 5000,
+		});
 		assert.equal(result.content[0].text, renderProcessResultText(result.details));
-		assert.ok(Value.Check(processScriptResultSchema, result.structuredContent));
+		assert.ok(Value.Check(tools.exec_command.outputSchema, result.structuredContent));
 		assertPlainJson(result.structuredContent);
-		assert.equal(result.structuredContent.output, result.details.output);
-		assert.equal(result.structuredContent.output, "a\nb\n");
-		assert.equal(result.structuredContent.exit_code, 3);
+		assert.equal(result.structuredContent.text, result.content[0].text);
+		assert.equal(result.structuredContent.details.output, result.details.output);
+		assert.equal(result.structuredContent.details.output, "a\nb\n");
+		assert.equal(result.structuredContent.details.exit_code, 3);
 	});
 
 	it("write_stdin, list_sessions, set_on_exit and kill_session cover live and unknown sessions", async () => {
-		const { call } = makeHarness();
-		const started = await call("exec_command", { cmd: "echo ready; sleep 30", yield_time_ms: 300 });
-		const sid = started.structuredContent.session_id;
+		const { call, tools } = makeHarness();
+		const started = await call("exec_command", {
+			cmd: `node -e "setTimeout(() => {}, 30000)"`,
+			shell: IS_WINDOWS ? "cmd" : "bash",
+			yield_time_ms: 300,
+		});
+		const sid = started.structuredContent.details.session_id;
 		assert.equal(typeof sid, "number");
-		assert.equal(started.structuredContent.status, "running");
+		assert.equal(started.structuredContent.details.status, "running");
 
 		const polled = await call("write_stdin", { session_id: sid, yield_time_ms: 5000 });
-		assert.ok(Value.Check(processScriptResultSchema, polled.structuredContent));
-		assert.equal(polled.structuredContent.running, true);
+		assert.ok(Value.Check(tools.write_stdin.outputSchema, polled.structuredContent));
+		assertPlainJson(polled.structuredContent);
+		assert.equal(polled.structuredContent.details.running, true);
+		assert.equal(polled.structuredContent.details.session_id, sid);
+		assert.equal(polled.structuredContent.text, polled.content[0].text);
 
 		const listed = await call("list_sessions", {});
 		assert.ok(Value.Check(listSessionsScriptResultSchema, listed.structuredContent));
@@ -199,17 +212,18 @@ describe("registered tools return structuredContent", { skip: IS_WINDOWS }, () =
 	});
 });
 
-describe("actual Pi codemode", { skip: IS_WINDOWS }, () => {
-	it("scripts receive an object whose output renders as bounded real lines", async () => {
+describe("actual Pi codemode", () => {
+	it("scripts receive typed details and can print the formatted reply directly", async () => {
 		const root = mkdtempSync(join(tmpdir(), "pi-unified-exec-codemode-"));
 		try {
 			const agentDir = join(root, "agent");
 			mkdirSync(agentDir);
+			const cmd = `node -e "for (let i = 1; i <= 40; i++) console.log('line of build output number', i)"`;
 			const script = [
-				'const r = await tools.exec_command({ cmd: "seq 1 40 | sed \'s/^/line of build output number /\'", yield_time_ms: 5000 });',
+				`const r = await tools.exec_command(${JSON.stringify({ cmd, shell: IS_WINDOWS ? "cmd" : "bash", yield_time_ms: 5000 })});`,
 				'const decl = await describeTool("exec_command");',
-				'text(JSON.stringify({ type: typeof r, exit_code: r.exit_code, lines: r.output.trimEnd().split("\\n").length, declared: /output: string/.test(JSON.stringify(decl)) }));',
-				"text(r.output);",
+				'text({ exit_code: r.details.exit_code, lines: r.details.output.trimEnd().split("\\n").length, declared: /details:\\s*{/.test(decl) && /text:\\s*string/.test(decl) });',
+				"text(r.text);",
 			].join("\n");
 			const provider = join(root, "provider.ts");
 			writeFileSync(
@@ -251,14 +265,19 @@ export default function(pi) {
 			const end = rows.find((row) => row.type === "tool_execution_end" && row.toolName === "codemode");
 			assert.ok(end, run.stdout.slice(-8000));
 			assert.equal(end.isError, false, JSON.stringify(end.result).slice(0, 4000));
-			const texts: string[] = end.result.content.filter((c: any) => c.type === "text").map((c: any) => c.text);
-			const summaryText = texts.find((t) => t.startsWith('{"type"'));
-			assert.ok(summaryText, texts.join("\n---\n"));
-			assert.deepEqual(JSON.parse(summaryText), { type: "object", exit_code: 0, lines: 40, declared: true });
+			const output: string = end.result.content
+				.filter((c: any) => c.type === "text")
+				.map((c: any) => c.text)
+				.join("\n");
+			const summaryText = output.match(/^\{"exit_code".*\}$/m)?.[0];
+			assert.ok(summaryText, output);
+			assert.deepEqual(JSON.parse(summaryText), { exit_code: 0, lines: 40, declared: true });
+			assert.match(output, /^\[exited\]\nexit_code: 0\n/m);
+			assert.match(output, /\n---\nline of build output number 1\n/);
+			assert.match(output, /^line of build output number 40$/m);
 			assert.match(run.stdout, /CODEMODE_OK/);
 
-			// Pi's own codemode renderer, collapsed at width 80: real lines are
-			// bounded by its five-line preview (22 rows before this change).
+			// The pinned Pi renderer bounds the collapsed multiline preview.
 			const { codemodeRenderers } = await import(
 				"../node_modules/@earendil-works/pi-coding-agent/dist/extensions/codemode/renderer.js"
 			);
