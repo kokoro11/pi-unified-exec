@@ -32,7 +32,7 @@ pi-flavor additions (`set_on_exit`, `kill_session`, `list_sessions`).
   across turns by interleaving `write_stdin` writes and polls. Once cumulative
   output reaches 512 bytes, the complete raw stream is archived in
   `.temp/pi-unified-exec/` under Pi's starting directory. Results show only
-  the log number, such as `001`.
+  the log number, such as `1`.
 - **Independent process and attachment lifetimes.** Initial `exec_command`
   and input-bearing `write_stdin` calls yield within 30 seconds. Empty polls
   default to five seconds and accept finite relative durations without a
@@ -127,7 +127,7 @@ Response body (short output, no truncation):
 session_id: 1                       (mutually exclusive with exit_code)
 exit_code: 0                        (mutually exclusive with session_id)
 signal: SIGTERM                     (optional, if killed)
-log: 001  (only once cumulative output reaches 512 bytes)
+log: 1  (only once cumulative output reaches 512 bytes)
 wall_time: 502ms
 omitted_bytes: 3145728              (only present when in-memory retention drops middle bytes)
 ---
@@ -153,7 +153,7 @@ When output exceeds the caps (50 KiB / 2000 lines), a footer is appended:
 ```
 ...tail of output...
 
-[Showing lines 3900-4120 of 4500 (50.0KB limit). Full output: 001]
+[Showing lines 3900-4120 of 4500 (50.0KB limit). Full output: 1]
 ```
 
 ### `write_stdin`
@@ -477,17 +477,17 @@ $ for i in {1..12}; do echo round $i; sleep 0.5; done (yield 2.5s · cwd: ~/proj
   round 4
   round 5
 
-elapsed 1.3s · session_id=2 · log: 002
+elapsed 1.3s · session_id=2 · log: 2
 ```
 
 **After yield, session still alive:**
 ```
-yielded 2.5s · session_id=2 · log: 002
+yielded 2.5s · session_id=2 · log: 2
 ```
 
 **After process exits:**
 ```
-took 4.2s · exit_code=0 · log: 001
+took 4.2s · exit_code=0 · log: 1
 ```
 
 **write_stdin:**
@@ -518,7 +518,7 @@ last output line 2
 last output line 3
 last output line 4
 last output line 5
-took 0.3s · killed session_id=2 · signal=SIGTERM · log: 002
+took 0.3s · killed session_id=2 · signal=SIGTERM · log: 2
 ```
 
 **list_sessions** shows up to five compact entries while collapsed and all
@@ -836,11 +836,11 @@ log file.
 | Per-call `max_output_tokens` knob | yes (default 10 000) | removed; fixed 50 KiB/2000 lines |
 | Truncation marker in body | `…N tokens truncated…` | `[Showing lines X-Y of T. Full output: …]` |
 
-The optional `log` field is a sequence number as a string, with no extension:
-`001`, `002`, and so on. It appears in `exec_command`, `write_stdin`,
-`kill_session`, and `list_sessions` once the session reaches 512 raw output
-bytes. Truncated replies include it in their recovery footer. For example,
-`log: 001` points to `.temp/pi-unified-exec/001.log`.
+The optional `log` field is a positive integer with no leading zeros. It
+appears in `exec_command`, `write_stdin`, `kill_session`, and `list_sessions`
+once the session reaches 512 raw output bytes. Truncated replies include it
+in their recovery footer. For example, `log: 1` points to
+`.temp/pi-unified-exec/1.log` and `log: 10` points to `.temp/pi-unified-exec/10.log`.
 
 The sequence starts after the highest existing number when Pi opens its
 first archive. Sessions share the archive directory under Pi's starting

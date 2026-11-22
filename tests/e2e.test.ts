@@ -378,7 +378,7 @@ describe("unified-exec e2e", () => {
 			const sid = started.details.session_id;
 			assert.ok(typeof sid === "number", JSON.stringify(started.details));
 			const log = started.details.log;
-			assert.match(log, /^\d{3,}$/);
+			assert.ok(Number.isSafeInteger(log) && log > 0);
 			const logPath = join(OUTPUT_LOG_DIRECTORY, `${log}.log`);
 			assert.ok(
 				await waitFor(() => {
@@ -701,7 +701,7 @@ describe("unified-exec e2e", () => {
 			assert.equal(finished.details.exit_code, 0);
 			assert.equal(finished.details.output, "b");
 			const log = finished.details.log;
-			assert.match(log, /^\d{3,}$/);
+			assert.ok(Number.isSafeInteger(log) && log > 0);
 			assert.equal(finished.structuredContent?.details.log, log);
 			const path = join(".temp", "pi-unified-exec", `${log}.log`);
 			assert.equal(readFileSync(path, "utf8"), "a".repeat(511) + "b");

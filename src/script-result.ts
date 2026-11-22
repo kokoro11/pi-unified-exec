@@ -19,8 +19,8 @@ function compact<T extends Record<string, unknown>>(value: T): T {
 	return value;
 }
 
-const logSchema = Type.Optional(Type.String({
-	pattern: "^\\d{3,}$",
+const logSchema = Type.Optional(Type.Integer({
+	minimum: 1,
 	description: `Log sequence number; present at ${MIN_LOG_BYTES} cumulative output bytes. Read ${OUTPUT_LOG_PATH_TEMPLATE} under Pi's cwd.`,
 }));
 
@@ -68,7 +68,7 @@ export function processScriptResult(shape: ProcessResultDetails): ProcessScriptR
 			exit_code: shape.exit_code,
 			signal: optionalMeta(shape.signal),
 			failure_message: optionalMeta(shape.failure_message),
-			log: optionalMeta(shape.log),
+			log: shape.log,
 			wall_time_seconds: shape.wall_time_seconds,
 			note: optionalMeta(shape.note),
 			wait_status: shape.wait_status,
@@ -104,7 +104,7 @@ export function killScriptResult(shape: KillResultDetails): KillScriptResult {
 		exit_code: shape.exit_code,
 		signal: optionalMeta(shape.signal),
 		failure_message: optionalMeta(shape.failure_message),
-		log: optionalMeta(shape.log),
+		log: shape.log,
 		wall_time_seconds: shape.wall_time_seconds,
 	});
 }
@@ -178,7 +178,7 @@ export function listSessionsScriptResult(value: {
 		wake_armed: boolean;
 		exit_code?: number | null;
 		signal?: string;
-		log?: string;
+		log?: number;
 	}>;
 	active_count: number;
 	just_exited_count: number;
@@ -197,7 +197,7 @@ export function listSessionsScriptResult(value: {
 				wake_armed: s.wake_armed,
 				exit_code: s.exit_code ?? undefined,
 				signal: optionalMeta(s.signal),
-				log: optionalMeta(s.log),
+				log: s.log,
 			}),
 		),
 		active_count: value.active_count,

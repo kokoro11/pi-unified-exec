@@ -22,7 +22,7 @@ describe("bounded tool results", () => {
 			signal: null,
 			failure: null,
 			tty: false,
-			log: "001",
+			log: 1,
 			cwd: "/tmp",
 			command: "printf hello",
 			yieldTimeMs: 250,
@@ -35,7 +35,7 @@ describe("bounded tool results", () => {
 		assert.equal(details.output, "hello\nworld\n");
 		assert.equal(
 			renderProcessResultText(details),
-			"[still running]\nsession_id: 7\nlog: 001\nwall_time: 250ms\n---\nhello\nworld\n",
+			"[still running]\nsession_id: 7\nlog: 1\nwall_time: 250ms\n---\nhello\nworld\n",
 		);
 	});
 
@@ -51,7 +51,7 @@ describe("bounded tool results", () => {
 			signal: "SIGTERM",
 			failure: null,
 			tty: false,
-			log: "042",
+			log: 42,
 			cwd: "/repo",
 			command: "noisy-job",
 			escalated: false,
@@ -70,7 +70,7 @@ describe("bounded tool results", () => {
 		const text = renderKillResultText(details);
 		assert.match(text, /^\[killed\]/);
 		assert.match(text, /Showing lines/);
-		assert.match(text, /Full output: 042\]/);
+		assert.match(text, /Full output: 42\]/);
 		assert.ok(Buffer.byteLength(text, "utf8") < DEFAULT_MAX_BYTES + 4096, `text bytes=${Buffer.byteLength(text)}`);
 	});
 
@@ -122,7 +122,7 @@ describe("bounded tool results", () => {
 			signal: null,
 			failure: "process still running; session remains registered",
 			tty: false,
-			log: "009",
+			log: 9,
 			escalated: true,
 			killed: false,
 		});

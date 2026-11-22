@@ -13,20 +13,20 @@ export class OutputLogDirectory {
 
 	constructor(private readonly path: string) {}
 
-	open(): { id: string; stream: WriteStream } {
+	open(): { id: number; stream: WriteStream } {
 		mkdirSync(this.path, { recursive: true });
 		if (this.next === undefined) {
 			let highest = 0;
 			for (const name of readdirSync(this.path)) {
-				if (!/^\d{3,}\.log$/.test(name)) continue;
+				if (!/^[1-9]\d*\.log$/.test(name)) continue;
 				const number = Number(name.slice(0, -LOG_EXTENSION.length));
 				if (Number.isSafeInteger(number) && number > highest) highest = number;
 			}
 			this.next = highest + 1;
 		}
 		while (Number.isSafeInteger(this.next)) {
-			const id = String(this.next).padStart(3, "0");
-			const path = join(this.path, id + LOG_EXTENSION);
+			const id = this.next;
+			const path = join(this.path, `${id}${LOG_EXTENSION}`);
 			let fd: number;
 			try {
 				fd = openSync(path, "wx");
@@ -47,7 +47,7 @@ const defaultDirectory = new OutputLogDirectory(OUTPUT_LOG_DIRECTORY);
 
 /** Keep small output in memory; archive the complete stream once it reaches 512 bytes. */
 export class OutputLog {
-	private logId: string | undefined;
+	private logId: number | undefined;
 	private stream: WriteStream | undefined;
 	private prefix: Uint8Array | undefined;
 	private prefixBytes = 0;
@@ -58,7 +58,7 @@ export class OutputLog {
 		private readonly directory = defaultDirectory,
 	) {}
 
-	get id(): string | undefined {
+	get id(): number | undefined {
 		return this.logId;
 	}
 

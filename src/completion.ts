@@ -38,7 +38,7 @@ export interface CompletionSessionLike {
 	readonly displayCommand: string;
 	readonly cwd: string;
 	readonly startedAt: number;
-	readonly log: string | undefined;
+	readonly log: number | undefined;
 	readonly hasExited: boolean;
 	readonly exitCode: number | null;
 	readonly signal: string | null;
@@ -56,7 +56,7 @@ export interface CompletionSnapshot {
 	exitCode: number | null;
 	signal: string | null;
 	failureMessage: string | null;
-	log: string | undefined;
+	log: number | undefined;
 }
 
 interface CompletionRecord {
@@ -478,7 +478,7 @@ export function buildWakeMessage(snapshots: CompletionSnapshot[]): WakeMessage {
 				`cwd: ${oneLine(s.cwd, 120)}${failure}`,
 		);
 		lines.push(`  command: ${oneLine(s.command, MAX_COMMAND_CHARS)}`);
-		if (s.log) lines.push(`  log: ${oneLine(s.log, 200)}`);
+		if (s.log) lines.push(`  log: ${s.log}`);
 	}
 	if (snapshots.length > shown.length) {
 		lines.push(`… and ${snapshots.length - shown.length} more (use list_sessions).`);

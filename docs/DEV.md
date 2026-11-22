@@ -245,7 +245,7 @@ the row cap; do not claim a hidden-row count after native preview truncation.
 
 - **Per-session log files** at `.temp/pi-unified-exec/<log>.log` under Pi's
   starting directory capture the complete raw byte stream the child wrote.
-  For example, `log: 001` refers to `001.log` in that directory. Inspect the
+  For example, `log: 1` refers to `1.log` in that directory. Inspect the
   raw bytes to diagnose ANSI and other terminal control sequences.
 - **`details.output` vs `content[0].text`**: the LLM reads
   `content[0].text` (structured); the TUI renderer reads

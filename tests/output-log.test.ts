@@ -41,8 +41,8 @@ describe("output log threshold", () => {
 		const output = encoder.encode("é".repeat(256));
 		log.write(output);
 		await close(log);
-		assert.equal(log.id, "001");
-		assert.deepEqual(readFileSync(join(path, "001.log")), Buffer.from(output));
+		assert.equal(log.id, 1);
+		assert.deepEqual(readFileSync(join(path, "1.log")), Buffer.from(output));
 	});
 
 	it("flushes every buffered prefix chunk and all subsequent writes", async () => {
@@ -53,12 +53,12 @@ describe("output log threshold", () => {
 		log.write(encoder.encode("c"));
 		log.write(encoder.encode("tail"));
 		await close(log);
-		assert.equal(readFileSync(join(path, "001.log"), "utf8"), "a".repeat(200) + "b".repeat(311) + "ctail");
+		assert.equal(readFileSync(join(path, "1.log"), "utf8"), "a".repeat(200) + "b".repeat(311) + "ctail");
 	});
 
 	it("continues after existing logs and skips numbers taken by another writer", async () => {
 		mkdirSync(path);
-		writeFileSync(join(path, "998.log"), "existing");
+		writeFileSync(join(path, "8.log"), "existing");
 		writeFileSync(join(path, "2000.txt"), "not a log");
 		const other = new OutputLogDirectory(path);
 		const first = new OutputLog(fail, directory);
@@ -68,11 +68,11 @@ describe("output log threshold", () => {
 		second.write(encoder.encode("b".repeat(512)));
 		third.write(encoder.encode("c".repeat(512)));
 		await Promise.all([close(first), close(second), close(third)]);
-		assert.equal(first.id, "999");
-		assert.equal(second.id, "1000");
-		assert.equal(third.id, "1001");
-		assert.equal(readFileSync(join(path, "998.log"), "utf8"), "existing");
-		assert.equal(readFileSync(join(path, "1000.log"), "utf8"), "b".repeat(512));
-		assert.equal(readFileSync(join(path, "1001.log"), "utf8"), "c".repeat(512));
+		assert.equal(first.id, 9);
+		assert.equal(second.id, 10);
+		assert.equal(third.id, 11);
+		assert.equal(readFileSync(join(path, "8.log"), "utf8"), "existing");
+		assert.equal(readFileSync(join(path, "10.log"), "utf8"), "b".repeat(512));
+		assert.equal(readFileSync(join(path, "11.log"), "utf8"), "c".repeat(512));
 	});
 });

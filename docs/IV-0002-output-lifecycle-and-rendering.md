@@ -22,7 +22,7 @@ The initiative establishes a durable output contract across these layers:
 1. **Capture:** sessions below 512 raw output bytes stay in memory. At 512
    cumulative bytes, the complete stream, including its buffered prefix, is
    mirrored to `.temp/pi-unified-exec/<log>.log` under Pi's starting directory.
-   Results show the sequence number without `.log`, such as `001`.
+   Results show the integer sequence number without leading zeros or `.log`.
 2. **Model/session result:** every output-bearing result is a bounded,
    terminal-inert plain-text tail with explicit truncation/omission metadata and
    a recovery path.

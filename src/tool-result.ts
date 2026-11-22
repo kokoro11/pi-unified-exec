@@ -29,7 +29,7 @@ export interface OutputResultDetails {
 	signal?: string;
 	failure_message?: string;
 	tty?: boolean;
-	log?: string;
+	log?: number;
 	cwd?: string;
 	command?: string;
 	truncation?: TruncationResult;
@@ -73,7 +73,7 @@ export interface KillResultDetails extends OutputResultDetails {
 interface OutputEnvelopeInput {
 	wallTimeSec: number;
 	collected: Uint8Array;
-	log?: string;
+	log?: number;
 	/** Middle bytes dropped by the retention cap during this call's drain. */
 	omittedBytes?: number;
 }
@@ -187,9 +187,9 @@ export function finalizeKillResult(input: FinalizeKillInput): KillResultDetails 
 }
 
 /** Pi-bash-style marker appended to model-visible text after a truncated body. */
-export function truncationMarker(t: TruncationResult | undefined, log: string | undefined): string | null {
+export function truncationMarker(t: TruncationResult | undefined, log: number | undefined): string | null {
 	if (!t?.truncated) return null;
-	const full = log ? `. Full output: ${safeMeta(log)}` : "";
+	const full = log ? `. Full output: ${log}` : "";
 	if (t.lastLinePartial) {
 		return `[Showing last ${formatSize(t.outputBytes)} of final line (line ${t.totalLines} is larger than the ${formatSize(DEFAULT_MAX_BYTES)} limit)${full}]`;
 	}
@@ -220,7 +220,7 @@ export function renderProcessResultText(shape: ProcessResultDetails): string {
 	if (shape.on_exit) lines.push(`on_exit: ${safeMeta(shape.on_exit)}`);
 	if (shape.completion_notification) lines.push(`completion_notification: ${safeMeta(shape.completion_notification)}`);
 	if (shape.tool_time_utc) lines.push(`tool_time_utc: ${safeMeta(shape.tool_time_utc)}`);
-	if (shape.log && !shape.truncation?.truncated) lines.push(`log: ${safeMeta(shape.log)}`);
+	if (shape.log && !shape.truncation?.truncated) lines.push(`log: ${shape.log}`);
 	lines.push(`wall_time: ${formatWallTime(shape.wall_time_seconds)}`);
 	if (shape.omitted_bytes) lines.push(`omitted_bytes: ${shape.omitted_bytes}`);
 	return appendOutputSection(lines, shape);
@@ -235,7 +235,7 @@ export function renderKillResultText(shape: KillResultDetails): string {
 	if (shape.exit_code !== undefined) lines.push(`exit_code: ${shape.exit_code}`);
 	if (shape.signal) lines.push(`signal: ${safeMeta(shape.signal)}`);
 	if (shape.failure_message) lines.push(`failure: ${safeMeta(shape.failure_message)}`);
-	if (shape.log && !shape.truncation?.truncated) lines.push(`log: ${safeMeta(shape.log)}`);
+	if (shape.log && !shape.truncation?.truncated) lines.push(`log: ${shape.log}`);
 	lines.push(`wall_time: ${formatWallTime(shape.wall_time_seconds)}`);
 	if (shape.omitted_bytes) lines.push(`omitted_bytes: ${shape.omitted_bytes}`);
 	return appendOutputSection(lines, shape);

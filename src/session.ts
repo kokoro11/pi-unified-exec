@@ -52,7 +52,7 @@ export class ExecSession {
 	private readonly outputLog: OutputLog;
 
 	/** Sequence number of the full-output archive, once output reaches 512 bytes. */
-	get log(): string | undefined {
+	get log(): number | undefined {
 		return this.outputLog.id;
 	}
 
