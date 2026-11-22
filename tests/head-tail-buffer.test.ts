@@ -2,11 +2,11 @@
  * Unit tests for HeadTailBuffer.
  *
  * Mirrors codex's head_tail_buffer_tests.rs. Run with:
- *   node --import tsx --test tests/head-tail-buffer.test.ts
+ *   bun test ./tests/head-tail-buffer.test.ts
  */
 
 import { strict as assert } from "node:assert";
-import { describe, it } from "node:test";
+import { describe, it } from "bun:test";
 import { HeadTailBuffer } from "../src/head-tail-buffer.ts";
 
 function s(str: string): Uint8Array {

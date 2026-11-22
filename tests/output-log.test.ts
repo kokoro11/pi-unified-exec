@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { describe, it } from "node:test";
+import { describe, it } from "bun:test";
 
 import { OutputLog, OUTPUT_LOG_DIRECTORY } from "../src/output-log.ts";
 

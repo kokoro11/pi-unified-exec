@@ -1,4 +1,4 @@
-// Minimal, entirely local MCP fixture; no network or provider credentials.
+// Local MCP fixture running under Node; no network or provider credentials.
 import { createInterface } from "node:readline";
 const input = createInterface({ input: process.stdin });
 input.on("line", line => {

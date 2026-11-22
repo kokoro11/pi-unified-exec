@@ -7,12 +7,11 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { describe, it } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_MAX_BYTES, initTheme } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
 
-import extensionFactory from "../src/index.ts";
 import {
 	killNotFoundScriptResult,
 	killScriptResult,
@@ -24,6 +23,7 @@ import {
 } from "../src/script-result.ts";
 import { IS_WINDOWS } from "../src/shell.ts";
 import { finalizeKillResult, finalizeProcessResult, renderProcessResultText } from "../src/tool-result.ts";
+import { activateProcessTools } from "./fixtures/process-tools.ts";
 
 const encoder = new TextEncoder();
 
@@ -53,7 +53,7 @@ function makeHarness() {
 		ui: { notify() {}, setStatus() {}, setWidget() {}, select: async () => undefined },
 		hasUI: false,
 	};
-	(extensionFactory as any)({
+	activateProcessTools({
 		registerTool: (def: any) => (tools[def.name] = def),
 		on() {},
 		registerCommand() {},
@@ -63,7 +63,7 @@ function makeHarness() {
 		getFlag: () => false,
 		getActiveTools: () => [],
 		setActiveTools() {},
-	});
+	} as any);
 	return {
 		tools,
 		call: (name: string, params: any) => tools[name].execute("test-call-id", params, undefined, undefined, ctx),
@@ -245,7 +245,7 @@ export default function(pi) {
 				fileURLToPath(new URL("../node_modules/@earendil-works/pi-coding-agent/dist/cli.js", import.meta.url));
 			const extension = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 			// prettier-ignore
-			const run = spawnSync(process.execPath, [
+			const run = spawnSync("node", [
 				// No --no-extensions: codemode is a built-in extension. HOME and the agent dir are isolated.
 				cli, "--mode", "json", "--no-session", "--no-skills", "--no-prompt-templates", "--no-themes",
 				"-e", provider, "-e", extension, "--tools", "codemode,exec_command", "--provider", "exec-codemode", "--model", "faux-1", "run it",
@@ -295,5 +295,5 @@ export default function(pi) {
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
-	});
+	}, 35_000);
 });

@@ -4,6 +4,8 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Run unit, integration, CLI and TUI tests with Bun's native test runner. Convert the TUI tests to TypeScript, remove `tsx`, and keep real Pi CLI subprocesses on Node.
+- Pin Bun to 1.4.4 for the Windows ConPTY integration tests.
 - Make `@homebridge/node-pty-prebuilt-multiarch` a required runtime dependency, retaining the exact `0.15.0` version and Bun install-script trust. Dependency installation failures now fail the package install.
 - Rename the result field `log_path` to `log` across text, structured results, TUI and wake messages. Describe its directory as `.temp/` under Pi's cwd so tool declarations stay identical across environments. Strip trailing decimal zeroes from four-significant-digit `wall_time` values.
 - Simplify process and kill reply headers: remove redundant metadata and byte/token counters, use adaptive `wall_time` units, and report log filenames instead of repeated directories. Sessions below 512 raw output bytes stay in memory; at 512 bytes, archive the complete stream in the starting directory's `.temp/` folder. Tool descriptions provide the shared log directory.

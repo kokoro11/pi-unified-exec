@@ -11,7 +11,7 @@
 
 import { strict as assert } from "node:assert";
 import { getEventListeners } from "node:events";
-import { describe, it } from "node:test";
+import { describe, it } from "bun:test";
 import { collectOutputUntilDeadline } from "../src/collect.ts";
 import { HeadTailBuffer } from "../src/head-tail-buffer.ts";
 import { Gate, Notify, sleep } from "../src/notify.ts";

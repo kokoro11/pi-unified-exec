@@ -104,11 +104,11 @@ The initiative establishes a durable output contract across these layers:
 | Explicit renderers and shared five-line preview | `src/render.ts` |
 | Native codemode factory/renderer wrapper | `src/codemode-render.ts`; registration from `src/index.ts` |
 | Codemode width/cache/schema and real-CLI parity | `tests/codemode-render.test.ts`, `tests/codemode-cli.test.ts` |
-| Real codemode TUI A/B/C, opt-out, no-warning, legacy exclusion and recovery | `tests/tui-codemode.test.mjs`, `tests/fixtures/codemode-*` |
+| Real codemode TUI A/B/C, opt-out, no-warning, legacy exclusion and recovery | `tests/tui-codemode.test.ts`, `tests/fixtures/codemode-*` |
 | Pure output and terminal-safety tests | `tests/{tool-result,output-safety}.test.ts` |
 | Collapse/expand/list/legacy-safety renderer tests | `tests/render.test.ts` |
 | Real delayed noisy-kill regression | `tests/e2e.test.ts` |
-| Package/runtime compatibility | `package.json`, `package-lock.json`, `.github/workflows/ci.yml` |
+| Package/runtime compatibility | `package.json`, `bun.lock`, `.github/workflows/ci.yml` |
 | Public behavior and development guidance | `README.md`, `docs/DEV.md`, `Changelog.md` |
 
 ## Related upstream issues
@@ -147,14 +147,14 @@ No npm publication, installed replacement or live model qualification.
 Automated gate:
 
 ```bash
-npm test
+bun run test
 ```
 
 Codemode focused gates (all providers are offline fixtures; MCP is local stdio):
 
 ```bash
-npx tsx --test tests/codemode-render.test.ts tests/codemode-cli.test.ts
-npm run test:tui
+bun test --timeout 30000 ./tests/codemode-render.test.ts ./tests/codemode-cli.test.ts
+bun run test:tui
 ```
 
 On Pi 0.99.1 at 100×60, native object/settled result text components took 20/21 rows;

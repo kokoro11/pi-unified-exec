@@ -14,7 +14,7 @@ import { strict as assert } from "node:assert";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { describe, it } from "bun:test";
 import { ExecSession, type SessionSpawnOptions } from "../src/session.ts";
 import { IS_WINDOWS } from "../src/shell.ts";
 import { finalizeProcessResult, renderProcessResultText } from "../src/tool-result.ts";
@@ -52,7 +52,7 @@ async function cleanup(session: ExecSession): Promise<void> {
 	await waitFor(() => session.hasExited, 5000);
 }
 
-describe("held-open session diagnostics", { skip: IS_WINDOWS }, () => {
+describe.skipIf(IS_WINDOWS)("held-open session diagnostics", () => {
 	const workdir = mkdtempSync(join(tmpdir(), "held-open-"));
 
 	it("un-redirected background job: shell exits, session stays open, shellExited exposes it", async () => {

@@ -7,12 +7,10 @@
  */
 
 import { strict as assert } from "node:assert";
-import { afterEach, describe, it } from "node:test";
+import { afterEach, describe, it } from "bun:test";
 import { waitForExitOrDeadline } from "../src/long-wait.ts";
-import extensionFactory from "../src/index.ts";
 import { isNestedToolCall, STEER_INTERRUPT_ENV, SteerGate, steerInterruptEnabled } from "../src/steer-gate.ts";
-
-process.env.PI_UNIFIED_EXEC_COMPACT_CODEMODE = "0";
+import { activateProcessTools } from "./fixtures/process-tools.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -160,7 +158,7 @@ function makeHarness() {
 		setActiveTools: () => {},
 		sendMessage: () => {},
 	};
-	(extensionFactory as any)(pi);
+	activateProcessTools(pi as any);
 	let nextId = 1;
 	const emit = async (event: string, evt: any = {}) => {
 		for (const h of handlers[event] ?? []) await h(evt, stubCtx);

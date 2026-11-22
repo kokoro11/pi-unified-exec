@@ -10,14 +10,12 @@
 import { strict as assert } from "node:assert";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { describe, it } from "bun:test";
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
-import extensionFactory, { MAX_EMPTY_POLL_ENV_VAR, resolveMaxEmptyPollMs } from "../src/index.ts";
+import { MAX_EMPTY_POLL_ENV_VAR, resolveMaxEmptyPollMs } from "../src/index.ts";
 import { OUTPUT_LOG_DIRECTORY } from "../src/output-log.ts";
 import { IS_WINDOWS } from "../src/shell.ts";
-
-// Process-tool harness: the fake API has no codemode surfaces (see codemode-render tests).
-process.env.PI_UNIFIED_EXEC_COMPACT_CODEMODE = "0";
+import { activateProcessTools } from "./fixtures/process-tools.ts";
 
 interface ToolDef {
 	name: string;
@@ -80,8 +78,7 @@ function makeHarness() {
 		setActiveTools: () => {},
 	};
 
-	// run the factory synchronously
-	(extensionFactory as any)(pi);
+	activateProcessTools(pi as any);
 
 	return {
 		async call(toolName: string, params: any, signal?: AbortSignal, onUpdate?: (partial: any) => void) {
@@ -142,7 +139,7 @@ describe("unified-exec e2e", () => {
 		}
 	});
 
-	it("Windows: shell=powershell and shell=cmd get shell-appropriate flags", { skip: !IS_WINDOWS }, async () => {
+	it.skipIf(!IS_WINDOWS)("Windows: shell=powershell and shell=cmd get shell-appropriate flags", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
 		const r1 = await h.call("exec_command", { cmd: "Write-Output ps-ok", shell: "powershell", yield_time_ms: 20000 });
@@ -157,7 +154,7 @@ describe("unified-exec e2e", () => {
 		await h.emit("session_shutdown");
 	});
 
-	it("Windows: cmd.exe quoting survives operators, quotes, %VAR%, parens", { skip: !IS_WINDOWS }, async () => {
+	it.skipIf(!IS_WINDOWS)("Windows: cmd.exe quoting survives operators, quotes, %VAR%, parens", async () => {
 		// These are exactly the inputs the /d /s /c "<cmd>" + verbatim-args
 		// mechanism exists for; `echo simple` would pass even if it broke.
 		const h = makeHarness();
@@ -731,10 +728,16 @@ describe("unified-exec e2e", () => {
 		assert.ok(rendered.includes("Showing lines"), `missing truncation marker in rendered text`);
 		assert.ok(rendered.includes(r.details.log), `marker should reference log`);
 
-		// Log file should contain ALL 4000 lines — full retention on disk.
-		const logContent = readFileSync(join(OUTPUT_LOG_DIRECTORY, r.details.log), "utf-8");
-		const logLines = logContent.split("\n").filter((l) => l.length);
-		assert.equal(logLines.length, 4000, `log should have 4000 lines; got ${logLines.length}`);
+		// The reply has a bounded post-exit wait; a busy disk may still be
+		// flushing the log. Check it once the final line reaches disk.
+		const path = join(OUTPUT_LOG_DIRECTORY, r.details.log);
+		let logContent = "";
+		assert.ok(await waitFor(() => {
+			logContent = readFileSync(path, "utf8");
+			return /\nline-number-4000-x+\r?\n/.test(logContent);
+		}), "the final line never reached the log");
+		const logLines = logContent.split("\n").filter(Boolean);
+		assert.equal(logLines.length, 4000);
 		await h.emit("session_shutdown");
 	});
 

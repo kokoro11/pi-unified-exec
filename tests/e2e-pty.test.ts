@@ -5,13 +5,10 @@
 
 import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
-import { describe, it } from "node:test";
-import extensionFactory from "../src/index.ts";
+import { describe, it } from "bun:test";
 import { isPtyAvailable, spawnChild } from "../src/pty.ts";
 import { IS_WINDOWS } from "../src/shell.ts";
-
-// Process-tool harness: the fake API has no codemode surfaces (see codemode-render tests).
-process.env.PI_UNIFIED_EXEC_COMPACT_CODEMODE = "0";
+import { activateProcessTools } from "./fixtures/process-tools.ts";
 
 /**
  * True when a real python3 exists. On Windows the "python3" on PATH may be
@@ -44,7 +41,7 @@ function makeHarness() {
 		getActiveTools: () => ["bash"],
 		setActiveTools: () => {},
 	};
-	(extensionFactory as any)(pi);
+	activateProcessTools(pi as any);
 	return {
 		async call(toolName: string, params: any, signal?: AbortSignal) {
 			return tools[toolName].execute("id", params, signal, undefined, stubCtx);
@@ -55,7 +52,7 @@ function makeHarness() {
 	};
 }
 
-describe("unified-exec PTY mode", { skip: !isPtyAvailable() }, () => {
+describe.skipIf(!isPtyAvailable())("unified-exec PTY mode", () => {
 	// NOTE: every test runs its body in try/finally with session_shutdown in
 	// the finally. A failed assertion mid-test must not leak a live PTY
 	// session: on Windows, ConPTY's conout worker keeps the event loop alive
@@ -82,7 +79,7 @@ describe("unified-exec PTY mode", { skip: !isPtyAvailable() }, () => {
 		}
 	});
 
-	it("write_stdin drives a Python REPL over PTY", { skip: !hasRealPython3() }, async () => {
+	it.skipIf(!hasRealPython3())("write_stdin drives a Python REPL over PTY", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
 		try {
@@ -169,7 +166,7 @@ describe("unified-exec PTY mode", { skip: !isPtyAvailable() }, () => {
 		}
 	});
 
-	it("Windows: shell=cmd with tty:true works (verbatim /c payload)", { skip: !IS_WINDOWS }, async () => {
+	it.skipIf(!IS_WINDOWS)("Windows: shell=cmd with tty:true works (verbatim /c payload)", async () => {
 		// Regression: node-pty's argsToCommandLine re-escapes embedded quotes,
 		// so array-args mangled the pre-quoted /s /c payload into
 		// `\"echo ...\"` — guaranteed "not recognized" failure. The PTY path
@@ -191,9 +188,9 @@ describe("unified-exec PTY mode", { skip: !isPtyAvailable() }, () => {
 		}
 	});
 
-	it("Windows: a kill requested before ConPTY connects terminates the process", { skip: !IS_WINDOWS, timeout: 10000 }, async () => {
+	it.skipIf(!IS_WINDOWS)("Windows: a kill requested before ConPTY connects terminates the process", async () => {
 		const child = spawnChild({
-			command: [process.execPath, "-e", "setTimeout(() => {}, 3000)"],
+			command: ["node", "-e", "setTimeout(() => {}, 3000)"],
 			cwd: process.cwd(),
 			env: process.env,
 			tty: true,
@@ -201,7 +198,7 @@ describe("unified-exec PTY mode", { skip: !isPtyAvailable() }, () => {
 		const exited = new Promise<number | null>((resolve) => child.onExit(resolve));
 		child.kill();
 		assert.equal(await exited, 1);
-	});
+	}, 10_000);
 
 	it("Ctrl-C (\\x03) interrupts a PTY loop", async () => {
 		const h = makeHarness();

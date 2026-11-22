@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { before, describe, it } from "node:test";
+import { beforeAll, describe, it } from "bun:test";
 import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 
 import {
@@ -45,7 +45,7 @@ function context(state: Record<string, unknown>, lastComponent?: unknown): any {
 	};
 }
 
-before(() => {
+beforeAll(() => {
 	initTheme("dark", false);
 });
 

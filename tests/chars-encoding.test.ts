@@ -17,11 +17,8 @@ import { strict as assert } from "node:assert";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
-import extensionFactory from "../src/index.ts";
-
-// Process-tool harness: the fake API has no codemode surfaces (see codemode-render tests).
-process.env.PI_UNIFIED_EXEC_COMPACT_CODEMODE = "0";
+import { describe, it } from "bun:test";
+import { activateProcessTools } from "./fixtures/process-tools.ts";
 
 interface ToolDef {
 	name: string;
@@ -60,7 +57,7 @@ function makeHarness() {
 		getActiveTools: () => ["bash"],
 		setActiveTools: () => {},
 	};
-	(extensionFactory as any)(pi);
+	activateProcessTools(pi as any);
 	return {
 		async call(toolName: string, params: any, signal?: AbortSignal) {
 			const def = tools[toolName];

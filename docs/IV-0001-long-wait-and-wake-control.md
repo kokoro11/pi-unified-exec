@@ -24,7 +24,7 @@ is not a prerequisite for long waits and this extension never overrides its
 cost policy or another extension's veto. Human-explicit absolute deadlines and
 completion wakes remain unchanged.
 
-Validation uses `npm test`, including the actual Pi CLI with a scripted local
+Validation uses `bun run test`, including the actual Pi CLI with a scripted local
 provider in `tests/cli-wait.test.ts`. Its synthetic 12-second cache lifetime
 schedules a refresh after two seconds while a 900,000 ms relative wait remains
 attached to a short real child process. Cases cover streaming/idle/off modes,

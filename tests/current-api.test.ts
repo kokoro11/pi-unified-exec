@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "bun:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import activate from "../src/index.ts";
-
-// This minimal fake API has no codemode surfaces; codemode-render tests cover them.
-process.env.PI_UNIFIED_EXEC_COMPACT_CODEMODE = "0";
+import { activateProcessTools } from "./fixtures/process-tools.ts";
 
 for (const keep of [false, true]) {
 	test(`current registered flag name controls builtin bash: ${keep}`, async () => {
@@ -17,7 +14,7 @@ for (const keep of [false, true]) {
 		} };
 		const lookups: string[] = [];
 		let active = ["bash", "read", "exec_command"];
-		activate({
+		activateProcessTools({
 			registerTool: () => {}, registerCommand: () => {}, registerFlag: () => {},
 			on: (name: string, handler: Handler) => { registered.set(name, [...(registered.get(name) ?? []), handler]); },
 			getFlag: (name: string) => { lookups.push(name); assert.equal(name, "keep-builtin-bash"); return keep; },
@@ -40,7 +37,7 @@ for (const keep of [false, true]) {
 }
 
 test("a rejected settled registration fails activation rather than selecting a legacy fallback", () => {
-	assert.throws(() => activate({
+	assert.throws(() => activateProcessTools({
 		registerTool: () => {}, registerCommand: () => {}, registerFlag: () => {},
 		on: (event: string) => { if (event === "agent_settled") throw new Error("registration rejected"); },
 	} as unknown as ExtensionAPI), /registration rejected/);

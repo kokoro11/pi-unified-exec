@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { test } from "node:test";
+import { test } from "bun:test";
 import { fileURLToPath } from "node:url";
 
 const cli = process.env.PI_UNIFIED_EXEC_TEST_CLI ?? fileURLToPath(
@@ -19,9 +19,9 @@ const cli = process.env.PI_UNIFIED_EXEC_TEST_CLI ?? fileURLToPath(
 const extension = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 const provider = fileURLToPath(new URL("./fixtures/steer-provider.js", import.meta.url));
 
-test("actual Pi: an RPC steer ends a long poll and reaches the next turn", { timeout: 40_000 }, async () => {
+test("actual Pi: an RPC steer ends a long poll and reaches the next turn", async () => {
 	const root = mkdtempSync(join(tmpdir(), "pi-exec-steer-"));
-	const child = spawn(process.execPath, [
+	const child = spawn("node", [
 		cli, "--mode", "rpc", "--no-session", "--no-extensions", "--no-skills",
 		"--no-prompt-templates", "--no-themes", "-e", provider, "-e", extension,
 		"--provider", "exec-steer-offline", "--model", "steer-model", "--thinking", "off",
@@ -104,4 +104,4 @@ test("actual Pi: an RPC steer ends a long poll and reaches the next turn", { tim
 			rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 		} catch {}
 	}
-});
+}, 40_000);

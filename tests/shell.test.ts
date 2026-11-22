@@ -12,7 +12,7 @@ import { strict as assert } from "node:assert";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { after, describe, it } from "node:test";
+import { afterAll, describe, it } from "bun:test";
 import {
 	buildShellCommand,
 	findOnPath,
@@ -40,7 +40,7 @@ function makePathDir(name: string, files: string[]): string {
 	return dir;
 }
 
-after(() => {
+afterAll(() => {
 	for (const dir of tempRoots) rmSync(dir, { recursive: true, force: true });
 	resetDefaultShellCache();
 });

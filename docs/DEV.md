@@ -5,12 +5,11 @@ and tool reference, see [../README.md](../README.md).
 
 ## Prerequisites
 
-- **Node ≥ 22.19** (see `package.json` `engines`; we use `AbortSignal`,
-  `fetch`, native ESM with `.ts` imports via
-  [tsx](https://github.com/privatenumber/tsx)).
-- **Bun 1.4.2** — the pinned package manager (`packageManager` in
-  `package.json`). It installs dependencies and runs the dev scripts;
-  tests still spawn real `node` processes, so Node stays required.
+- **Node ≥ 22.19** (see `package.json` `engines`). The CLI and TUI tests
+  start the real Pi CLI under Node, the supported runtime.
+- **Bun 1.4.4** — the pinned package manager (`packageManager` in
+  `package.json`). It installs dependencies and runs the native
+  `bun test` suite.
 - **Linux, macOS, or Windows.** On Windows, Git Bash is strongly
   recommended (it's the default shell when on PATH; otherwise commands
   fall back to `powershell`). PTY mode uses ConPTY via the
@@ -51,12 +50,12 @@ Verify the install:
 
 ```bash
 bun run check                       # clean strict typecheck
-bun run test                        # typecheck + all tests
+bun run test                        # typecheck + all tests, including TUI when tmux is available
 ```
 
-You should see on the order of **250+** tests with `fail 0` (a few skipped on
-non-Windows or when no real `python3` is installed — e.g. on Windows, where
-the Store stub doesn't count).
+Expect `0 fail`. Some cases are platform-specific. The Python REPL case
+skips without a real `python3`, and the TUI cases skip on Windows or without
+tmux.
 
 ## Repo layout
 
@@ -88,7 +87,7 @@ sibling view, indexed by concern:
 
 1. Edit files under `src/`.
 2. `bun run check` (catch type errors early).
-3. `bunx tsx --test tests/<relevant>.test.ts` (fast inner loop).
+3. `bun test ./tests/<relevant>.test.ts` (fast inner loop).
 4. `bun run test` before committing.
 5. In a running pi: `/reload` to pick up changes.
 
@@ -131,42 +130,42 @@ pi -p --mode json --provider anthropic --model claude-sonnet-4 \
 
 ```bash
 # Pure units (fast, no subprocesses)
-bunx tsx --test tests/head-tail-buffer.test.ts \
-                tests/notify.test.ts \
-                tests/truncate.test.ts \
-                tests/unescape.test.ts \
-                tests/session-store.test.ts
+bun test ./tests/head-tail-buffer.test.ts \
+         ./tests/notify.test.ts \
+         ./tests/truncate.test.ts \
+         ./tests/unescape.test.ts \
+         ./tests/session-store.test.ts
 
 # End-to-end against real bash / cat (seconds)
-bunx tsx --test tests/e2e.test.ts
-bunx tsx --test tests/chars-encoding.test.ts
+bun test --timeout 30000 ./tests/e2e.test.ts
+bun test --timeout 30000 ./tests/chars-encoding.test.ts
 
 # PTY-backed (requires @homebridge/node-pty-prebuilt-multiarch to have loaded)
-bunx tsx --test tests/e2e-pty.test.ts
+bun test --timeout 30000 ./tests/e2e-pty.test.ts
 
 # Empty-poll duration policy, shared waits and wake delivery
-bunx tsx --test tests/time.test.ts tests/long-wait.test.ts tests/wake-e2e.test.ts
+bun test --timeout 30000 ./tests/time.test.ts ./tests/long-wait.test.ts ./tests/wake-e2e.test.ts
 
 # Actual Pi CLI with a local scripted provider; no model traffic
-bunx tsx --test tests/cli-wait.test.ts
+bun test ./tests/cli-wait.test.ts
 # Optionally set PI_UNIFIED_EXEC_TEST_CLI to another published dist/cli.js.
 bun run test:tui  # isolated tmux: waits/Esc plus codemode A/B/C, widths/themes/expansion
 
 # Short exec/input collection
-bunx tsx --test tests/collect.test.ts
+bun test ./tests/collect.test.ts
 
 # Native codemode display-only factory, renderer, opt-out and actual-CLI parity
-bunx tsx --test tests/codemode-render.test.ts tests/codemode-cli.test.ts
+bun test --timeout 30000 ./tests/codemode-render.test.ts ./tests/codemode-cli.test.ts
 ```
 
 ## Writing new tests
 
-We use Node's built-in `node:test` runner loaded via `tsx` (no jest,
-no vitest). Pattern:
+Use Bun's native `bun:test` API. Existing tests use `node:assert/strict`
+for assertions:
 
 ```ts
-import { strict as assert } from "node:assert";
-import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { describe, it } from "bun:test";
 import { myFunction } from "../src/my-module.ts";
 
 describe("my-module", () => {

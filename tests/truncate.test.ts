@@ -7,7 +7,7 @@
  */
 
 import { strict as assert } from "node:assert";
-import { describe, it } from "node:test";
+import { describe, it } from "bun:test";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateTail } from "@earendil-works/pi-coding-agent";
 
 describe("truncateTail", () => {

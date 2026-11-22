@@ -24,7 +24,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
 
       - uses: actions/setup-node@v6
         with:
@@ -32,21 +32,6 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
-
-      # Windows only: run the PTY e2e file directly (not via --test) so
-      # per-test output streams live instead of being buffered until file
-      # completion — if a ConPTY hang recurs, the log shows exactly which
-      # test. Linux/macOS never exhibited the hang; they run the file once
-      # via the glob below.
-      - name: Test (PTY e2e, direct)
-        if: runner.os == 'Windows'
-        # pty-load first: the e2e file skips itself when PTY is unavailable,
-        # so without the load assertion this diagnostic could "pass" by
-        # skipping everything.
-        run: bunx tsx tests/pty-load.test.ts && bunx tsx tests/e2e-pty.test.ts
-        timeout-minutes: 5
-        env:
-          EXPECT_PTY: "1"
 
       - name: Test
         run: bun run test

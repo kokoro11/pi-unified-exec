@@ -3,18 +3,18 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { test } from "bun:test";
 import { fileURLToPath } from "node:url";
 
-const available = spawnSync("tmux", ["-V"]).status === 0;
+const tuiTest = test.skipIf(process.platform === "win32" || spawnSync("tmux", ["-V"]).status !== 0);
 const cli = process.env.PI_UNIFIED_EXEC_TEST_CLI ?? fileURLToPath(
 	new URL("../node_modules/@earendil-works/pi-coding-agent/dist/cli.js", import.meta.url),
 );
 const extension = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 const provider = fileURLToPath(new URL("./fixtures/wait-provider.js", import.meta.url));
-const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
-const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function until(check, message, timeout = 15_000) {
+const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+async function until(check: () => boolean, message: string, timeout = 15_000) {
 	const deadline = Date.now() + timeout;
 	while (Date.now() < deadline) {
 		if (check()) return;
@@ -22,7 +22,7 @@ async function until(check, message, timeout = 15_000) {
 	}
 	assert.fail(message);
 }
-const alive = pid => {
+const alive = (pid: number) => {
 	try { process.kill(pid, 0); return true; } catch { return false; }
 };
 
@@ -31,17 +31,16 @@ const titles = {
 	cancel: "cancels without killing",
 	steer: "returns early on a typed steer without killing",
 };
-for (const mode of ["exit", "cancel", "steer"]) {
+type WaitEvent = { type: "wait-start" } | { type: "wait-end"; details: { wait_status: string; running: boolean } };
+for (const mode of ["exit", "cancel", "steer"] as const) {
 	const cancel = mode !== "exit";
-	test(`TUI: long relative wait ${titles[mode]}`, {
-		skip: !available || process.platform === "win32", timeout: 30_000,
-	}, async () => {
+	tuiTest(`TUI: long relative wait ${titles[mode]}`, async () => {
 		const root = mkdtempSync(join(tmpdir(), "pi-exec-tui-"));
 		const name = `exec-wait-${process.pid}-${mode}`;
-		const tmux = (...args) => execFileSync("tmux", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+		const tmux = (...args: string[]) => execFileSync("tmux", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 		const pane = () => tmux("capture-pane", "-p", "-S", "-200", "-t", name);
-		const events = () => readFileSync(join(root, "events.jsonl"), "utf8").split("\n").filter(Boolean).map(JSON.parse);
-		let pid;
+		const events = (): WaitEvent[] => readFileSync(join(root, "events.jsonl"), "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line));
+		let pid: number | undefined;
 		try {
 			const agentDir = join(root, "agent");
 			mkdirSync(agentDir);
@@ -57,7 +56,7 @@ setTimeout(() => console.log("job-finished"), ${cancel ? 30_000 : 5000});
 			const command = [
 				"env", `HOME=${root}`, `PI_CODING_AGENT_DIR=${agentDir}`, "PI_OFFLINE=1",
 				"PI_UNIFIED_EXEC_MAX_EMPTY_POLL_MS=", "EXEC_WAIT_SCENARIO=off",
-				process.execPath, cli, "--no-session", "--no-extensions", "--no-skills",
+				"node", cli, "--no-session", "--no-extensions", "--no-skills",
 				"--no-prompt-templates", "--no-themes", "-e", provider, "-e", extension,
 				"--provider", "exec-wait-offline", "--model", "wait-model", "--thinking", "off", "run fixture",
 			].map(quote).join(" ");
@@ -71,6 +70,7 @@ setTimeout(() => console.log("job-finished"), ${cancel ? 30_000 : 5000});
 				tmux("send-keys", "-t", name, "Enter");
 				await until(() => events().some(e => e.type === "wait-end"), "steer did not end the wait");
 				const end = events().find(e => e.type === "wait-end");
+				assert.ok(end);
 				assert.equal(end.details.wait_status, "interrupted_by_steer");
 				assert.equal(end.details.running, true);
 				assert.ok(alive(pid), "a steer must leave the child alive");
@@ -80,18 +80,20 @@ setTimeout(() => console.log("job-finished"), ${cancel ? 30_000 : 5000});
 				tmux("send-keys", "-t", name, "Escape");
 				await until(() => events().some(e => e.type === "wait-end"), "Esc did not detach");
 				const end = events().find(e => e.type === "wait-end");
+				assert.ok(end);
 				assert.equal(end.details.wait_status, "cancelled");
 				assert.equal(end.details.running, true);
 				assert.ok(alive(pid), "Esc must leave the child alive");
 			} else {
 				await until(() => pane().includes("EXEC_WAIT_OK"), "completion not rendered");
 				assert.match(pane(), /job-finished/);
-				assert.equal(events().find(e => e.type === "wait-end").details.wait_status, "completed");
+				assert.equal(events().find(e => e.type === "wait-end")?.details.wait_status, "completed");
 			}
 			tmux("send-keys", "-t", name, "C-c");
 			await pause(200);
 			tmux("send-keys", "-t", name, "C-c");
-			await until(() => !alive(pid), "session shutdown did not terminate the child");
+			const childPid = pid;
+			await until(() => !alive(childPid), "session shutdown did not terminate the child");
 		} finally {
 			try { tmux("kill-session", "-t", name); } catch {}
 			if (pid && alive(pid)) { try { process.kill(pid, "SIGKILL"); } catch {} }
@@ -101,5 +103,5 @@ setTimeout(() => console.log("job-finished"), ${cancel ? 30_000 : 5000});
 			}
 			rmSync(root, { recursive: true, force: true });
 		}
-	});
+	}, 30_000);
 }

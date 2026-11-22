@@ -4,7 +4,7 @@
  */
 
 import { strict as assert } from "node:assert";
-import { describe, it } from "node:test";
+import { describe, it } from "bun:test";
 import { formatRemainingLater, formatWallTime } from "../src/format-time.ts";
 import { MAX_EMPTY_POLL_ENV_VAR, nowUtcIso, parseYieldUntil, resolveEmptyPollYield, resolveMaxEmptyPollMs } from "../src/time.ts";
 

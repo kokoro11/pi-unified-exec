@@ -12,11 +12,11 @@
  */
 
 import { strict as assert } from "node:assert";
-import { describe, it } from "node:test";
+import { describe, it } from "bun:test";
 import { disposeWindowsConpty, getPtyLoadError, isPtyAvailable } from "../src/pty.ts";
 
 describe("PTY module loading", () => {
-	it("loads when EXPECT_PTY=1", { skip: process.env.EXPECT_PTY !== "1" }, () => {
+	it.skipIf(process.env.EXPECT_PTY !== "1")("loads when EXPECT_PTY=1", () => {
 		assert.equal(isPtyAvailable(), true, `PTY module failed to load: ${getPtyLoadError()}`);
 	});
 

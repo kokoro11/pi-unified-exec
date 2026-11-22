@@ -3,14 +3,14 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { test } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { COMPACT_CODEMODE_ENV } from "../src/codemode-render.ts";
 
 const cli = process.env.PI_UNIFIED_EXEC_TEST_CLI ?? fileURLToPath(new URL("../node_modules/@earendil-works/pi-coding-agent/dist/cli.js", import.meta.url));
 const extension = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 const provider = fileURLToPath(new URL("./fixtures/codemode-provider.js", import.meta.url));
-const mcpFixture = fileURLToPath(new URL("./fixtures/codemode-mcp.mjs", import.meta.url));
+const mcpFixture = fileURLToPath(new URL("./fixtures/codemode-mcp.js", import.meta.url));
 type RunOptions = { fixed?: boolean; pattern?: string; mode?: "on" | "only"; budget?: number; active?: boolean; mcp?: boolean; packageEnabled?: boolean; exclude?: boolean };
 // `fixed` is the default; `exclude` is the 0.12.1-era `-builtin:codemode` setup.
 function run({ fixed = true, pattern = "parity", mode = "on", budget = 3000, active = true, mcp = false, packageEnabled = true, exclude = false }: RunOptions = {}) {
@@ -24,7 +24,7 @@ function run({ fixed = true, pattern = "parity", mode = "on", budget = 3000, act
 			extensions: exclude ? ["-builtin:codemode"] : [],
 		}));
 		const capture = join(root, "requests.jsonl");
-		const child = spawnSync(process.execPath, [
+		const child = spawnSync("node", [
 			cli, "--mode", "json", "--no-session", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files",
 			"-e", provider, ...(packageEnabled ? ["-e", extension, "--keep-builtin-bash"] : []),
 			"--provider", "exec-codemode-offline", "--model", "codemode-model", "--thinking", "off", "run fixture",
@@ -49,7 +49,7 @@ const stores = (events: any[]) => events.filter(e => e.type === "entry_appended"
 const declarations = (requests: any[]) => requests.map(r => r.tools);
 
 for (const mode of ["on", "only"] as const) for (const budget of [0, 3000]) {
-	test(`codemode CLI native parity: ${mode}, budget ${budget}`, { timeout: 30_000 }, () => {
+	test(`codemode CLI native parity: ${mode}, budget ${budget}`, () => {
 		const native = run({ fixed: false, mode, budget });
 		const fixed = run({ mode, budget });
 		const excluded = run({ mode, budget, exclude: true });
@@ -73,7 +73,7 @@ for (const mode of ["on", "only"] as const) for (const budget of [0, 3000]) {
 		const description = fixed.requests[0].tools.find((t: any) => t.name === "codemode").description;
 		if (budget === 0) assert.doesNotMatch(description, /declare const tools:/);
 		else assert.match(description, /declare const tools:/);
-	});
+	}, 30_000);
 }
 
 test("codemode CLI replacement remains inactive without normal activation", () => {

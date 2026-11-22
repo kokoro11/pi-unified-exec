@@ -5,7 +5,7 @@
  */
 
 import { strict as assert } from "node:assert";
-import { describe, it } from "node:test";
+import { describe, it } from "bun:test";
 import { MAX_TIMER_ARM_MS, startRateLimitedStream, waitForExitOrDeadline } from "../src/long-wait.ts";
 import { Notify } from "../src/notify.ts";
 

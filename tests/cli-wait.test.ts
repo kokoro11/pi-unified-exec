@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { test } from "bun:test";
 import { fileURLToPath } from "node:url";
 
 const cli = process.env.PI_UNIFIED_EXEC_TEST_CLI ?? fileURLToPath(
@@ -13,7 +13,7 @@ const extension = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 const provider = fileURLToPath(new URL("./fixtures/wait-provider.js", import.meta.url));
 
 for (const scenario of ["streaming", "idle", "off", "veto", "no-ttl", "cheap"]) {
-	test(`actual Pi: uncapped relative wait with ${scenario} warming`, { timeout: 30_000 }, () => {
+	test(`actual Pi: uncapped relative wait with ${scenario} warming`, () => {
 		const root = mkdtempSync(join(tmpdir(), "pi-exec-wait-"));
 		try {
 			const agentDir = join(root, "agent");
@@ -25,7 +25,7 @@ for (const scenario of ["streaming", "idle", "off", "veto", "no-ttl", "cheap"]) 
 			}));
 			writeFileSync(join(root, "events.jsonl"), "");
 			writeFileSync(join(root, "job.cjs"), 'setTimeout(() => console.log("job-finished"), 3500);\n');
-			const result = spawnSync(process.execPath, [
+			const result = spawnSync("node", [
 				cli, "--mode", "json", "--no-session", "--no-extensions", "--no-skills",
 				"--no-prompt-templates", "--no-themes", "-e", provider, "-e", extension,
 				"--provider", "exec-wait-offline", "--model", "wait-model", "--thinking", "off", "run fixture",
@@ -61,5 +61,5 @@ for (const scenario of ["streaming", "idle", "off", "veto", "no-ttl", "cheap"]) 
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
-	});
+	}, 30_000);
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { test } from "node:test";
+import { test } from "bun:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createCodemodeExtension, initTheme, type AgentToolResult, type CodemodeToolDetails, type ExtensionAPI, type Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";

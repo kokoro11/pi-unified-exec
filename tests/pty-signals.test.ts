@@ -8,7 +8,7 @@
 
 import { strict as assert } from "node:assert";
 import { constants } from "node:os";
-import { describe, it } from "node:test";
+import { describe, it } from "bun:test";
 import { signalNameFromNumber } from "../src/pty.ts";
 
 describe("signalNameFromNumber", () => {

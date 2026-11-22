@@ -676,7 +676,7 @@ Killed session 1 (pid 12345) with SIGTERM — exit_code=143
 ### 2. Long-running non-interactive job
 
 ```
-> exec_command(cmd="npm test", yield_time_ms=1000, on_exit="wake")
+> exec_command(cmd="bun run test", yield_time_ms=1000, on_exit="wake")
 [still running]
 session_id: 2
 completion_notification: armed
@@ -752,11 +752,12 @@ From the repo root:
 
 ```bash
 bun install
-bun run test             # strict typecheck + unit/integration + offline actual-CLI tests
-bun run test:tui         # isolated tmux acceptance, skips if tmux is unavailable
+bun run test             # strict typecheck + Bun suite (unit, integration, CLI and TUI)
+bun run test:tui         # just the tmux cases
 ```
 
-The CLI/TUI fixtures use a local scripted provider, not a live model. Set
+The CLI/TUI fixtures start Pi under Node and use a local scripted provider.
+The TUI cases skip on Windows or when tmux is unavailable. Set
 `PI_UNIFIED_EXEC_TEST_CLI=/path/to/pi/dist/cli.js` to exercise another published
 Pi version without changing package dependency pins.
 
