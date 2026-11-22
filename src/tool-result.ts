@@ -81,6 +81,7 @@ interface OutputEnvelopeInput {
 
 export interface FinalizeProcessInput extends OutputEnvelopeInput {
 	operation: ProcessOperation;
+	running: boolean;
 	sessionId: number | undefined;
 	exitCode: number | null | undefined;
 	signal: NodeJS.Signals | null;
@@ -141,12 +142,11 @@ function createOutputEnvelope(input: OutputEnvelopeInput): OutputEnvelope {
 
 export function finalizeProcessResult(input: FinalizeProcessInput): ProcessResultDetails {
 	const envelope = createOutputEnvelope(input);
-	const running = input.sessionId !== undefined;
 	const shape: ProcessResultDetails = {
 		...envelope,
 		operation: input.operation,
-		status: running ? "running" : "exited",
-		running,
+		status: input.running ? "running" : "exited",
+		running: input.running,
 		tty: input.tty,
 	};
 	if (input.sessionId !== undefined) shape.session_id = input.sessionId;
@@ -210,10 +210,15 @@ function appendOutputSection(lines: string[], shape: OutputResultDetails): strin
 	return `${header}\n---\n${body}${footer}`;
 }
 
+function appendWallTime(lines: string[], seconds: number): void {
+	const wallTime = formatWallTime(seconds);
+	if (wallTime !== "0ms") lines.push(`wall_time: ${wallTime}`);
+}
+
 export function renderProcessResultText(shape: ProcessResultDetails): string {
-	const lines: string[] = [shape.running ? "[still running]" : "[exited]"];
-	if (shape.session_id !== undefined) lines.push(`session_id: ${shape.session_id}`);
-	if (shape.exit_code !== undefined) lines.push(`exit_code: ${shape.exit_code}`);
+	const id = shape.session_id === undefined ? "" : ` #${shape.session_id}`;
+	const outcome = shape.exit_code === 0 ? "ok" : shape.exit_code === undefined ? "error" : `error ${shape.exit_code}`;
+	const lines = [shape.running ? `[running${id}]` : `[exited${id} ${outcome}]`];
 	if (shape.signal) lines.push(`signal: ${safeMeta(shape.signal)}`);
 	if (shape.failure_message) lines.push(`failure: ${safeMeta(shape.failure_message)}`);
 	if (shape.note) lines.push(`note: ${safeMeta(shape.note)}`);
@@ -223,7 +228,7 @@ export function renderProcessResultText(shape: ProcessResultDetails): string {
 	if (shape.on_exit) lines.push(`on_exit: ${safeMeta(shape.on_exit)}`);
 	if (shape.completion_notification) lines.push(`completion_notification: ${safeMeta(shape.completion_notification)}`);
 	if (shape.log && !shape.truncation?.truncated) lines.push(`log: ${shape.log}`);
-	lines.push(`wall_time: ${formatWallTime(shape.wall_time_seconds)}`);
+	appendWallTime(lines, shape.wall_time_seconds);
 	if (shape.total_time_seconds !== undefined) lines.push(`total_time: ${formatWallTime(shape.total_time_seconds)}`);
 	if (shape.omitted_bytes) lines.push(`omitted_bytes: ${shape.omitted_bytes}`);
 	return appendOutputSection(lines, shape);
@@ -239,7 +244,7 @@ export function renderKillResultText(shape: KillResultDetails): string {
 	if (shape.signal) lines.push(`signal: ${safeMeta(shape.signal)}`);
 	if (shape.failure_message) lines.push(`failure: ${safeMeta(shape.failure_message)}`);
 	if (shape.log && !shape.truncation?.truncated) lines.push(`log: ${shape.log}`);
-	lines.push(`wall_time: ${formatWallTime(shape.wall_time_seconds)}`);
+	appendWallTime(lines, shape.wall_time_seconds);
 	if (shape.omitted_bytes) lines.push(`omitted_bytes: ${shape.omitted_bytes}`);
 	return appendOutputSection(lines, shape);
 }

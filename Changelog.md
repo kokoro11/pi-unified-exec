@@ -4,6 +4,7 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Use compact process headers (`[running #N]`, `[exited ok]`, or `[exited error CODE]`) and omit `wall_time` when it rounds to `0ms`. Final `write_stdin` results keep their session ID in the header and structured details; check `running` before polling again.
 - Show `wait_status` in formatted replies only when a wait is cancelled or interrupted by a steer; keep normal outcomes in structured results. Remove `tool_time_utc` from tool results and report `current_utc_time` on `yield_until` validation errors.
 - Report `total_time` on `write_stdin` results (`details.total_time_seconds` in scripts). It measures the session from launch until exit, while `wall_time` measures the current call.
 - Report sequential log IDs as integers without padding or a suffix, such as `1` or `10`. Store archives at `.temp/pi-unified-exec/<log>.log`, continue after existing numbers, and reserve each filename without overwriting other Pi processes' logs.

@@ -7,7 +7,7 @@
  * close-based session exit indefinitely. The shell's own `exit` event is
  * exposed as `shellExited` so callers can distinguish "command still working"
  * from "shell gone, pipe held" and attach an explanatory note to
- * `[still running]` results.
+ * `[running #N]` results.
  */
 
 import { strict as assert } from "node:assert";
@@ -107,6 +107,7 @@ describe.skipIf(IS_WINDOWS)("held-open session diagnostics", () => {
 	it("render: held-open sessions carry the explanatory note, exited sessions do not", () => {
 		const running = finalizeProcessResult({
 			operation: "exec_command",
+			running: true,
 			wallTimeSec: 1,
 			collected: new Uint8Array(0),
 			sessionId: 7,
@@ -117,11 +118,12 @@ describe.skipIf(IS_WINDOWS)("held-open session diagnostics", () => {
 			extra: { note: HELD_OPEN_NOTE },
 		});
 		const runningText = renderProcessResultText(running);
-		assert.match(runningText, /\[still running\]/);
+		assert.match(runningText, /^\[running #7\]\n/);
 		assert.match(runningText, /note: shell has exited, but background process/);
 
 		const exited = finalizeProcessResult({
 			operation: "exec_command",
+			running: false,
 			wallTimeSec: 0.1,
 			collected: new Uint8Array(0),
 			sessionId: undefined,
@@ -131,7 +133,7 @@ describe.skipIf(IS_WINDOWS)("held-open session diagnostics", () => {
 			tty: false,
 		});
 		const exitedText = renderProcessResultText(exited);
-		assert.match(exitedText, /\[exited\]/);
+		assert.match(exitedText, /^\[exited ok\]\n/);
 		assert.doesNotMatch(exitedText, /note:/);
 	});
 

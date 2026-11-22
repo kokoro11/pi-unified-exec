@@ -194,7 +194,8 @@ describe("write_stdin yield_until", () => {
 		const r2 = await h.call("write_stdin", { session_id: sid, yield_until: inFuture(60_000) });
 		assert.ok(Date.now() - t0 < 10_000, "must return on exit, not at the deadline");
 		assert.equal(r2.details.exit_code, 0, JSON.stringify(r2.details));
-		assert.equal(r2.details.session_id, undefined);
+		assert.equal(r2.details.session_id, sid);
+		assert.equal(r2.details.running, false);
 		assert.equal(r2.details.wait_mode, "absolute");
 		assert.equal(r2.details.wait_status, "completed");
 		assert.equal(r2.details.completion_delivery, "direct");

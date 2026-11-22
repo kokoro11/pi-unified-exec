@@ -248,9 +248,9 @@ the row cap; do not claim a hidden-row count after native preview truncation.
   For example, `log: 1` refers to `1.log` in that directory. Inspect the
   raw bytes to diagnose ANSI and other terminal control sequences.
 - **`details.output` vs `content[0].text`**: the LLM reads
-  `content[0].text` (structured); the TUI renderer reads
+  `content[0].text` (formatted reply); the TUI renderer reads
   `details.output` (clean body). If the TUI shows a header like
-  `[still running]\nsession_id: …` verbatim, the renderer is failing
+  `[running #1]` verbatim, the renderer is failing
   and falling back to pi's default. Check `src/render.ts`.
 - **`list_sessions` tool** (invokable from the LLM side) is the
   quickest way to audit what's live.

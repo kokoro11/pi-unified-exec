@@ -189,7 +189,7 @@ describe("unified-exec e2e", () => {
 		await h.emit("session_shutdown");
 	});
 
-	it("process that exits BETWEEN calls is still drainable via write_stdin", async () => {
+	it("write_stdin returns the final result when the process already exited before the write", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
 		// 3 ticks @ 200ms = 600ms runtime. Yield at 250ms -> session_id returned.
@@ -208,19 +208,22 @@ describe("unified-exec e2e", () => {
 		// Wait for the process to definitely exit (600ms runtime - 250ms yield + slack).
 		await new Promise((r) => setTimeout(r, 800));
 
-		// Now poll — process has already exited, but the store should still have
+		// Try a write — the process has already exited, but the store should still have
 		// the entry so we can observe the exit and drain trailing output.
 		const secondsBeforePoll = (performance.now() - startedAt) / 1000;
 		const r2 = await h.call("write_stdin", {
 			session_id: sid,
-			chars: "",
+			chars: "input after exit\n",
 			yield_time_ms: 5000,
 		});
 		assert.equal(r2.details.exit_code, 0, `expected exit_code=0; got ${JSON.stringify(r2.details)}`);
-		assert.equal(r2.details.session_id, undefined);
+		assert.equal(r2.details.session_id, sid);
+		assert.equal(r2.details.running, false);
+		assert.ok(r2.content[0].text.startsWith(`[exited #${sid} ok]\n`));
 		assert.ok(r2.details.output.includes("tock 3"), `expected 'tock 3' in output: ${r2.details.output}`);
 		const total = r2.details.total_time_seconds;
 		assert.ok(total >= 0.55 && total < secondsBeforePoll - 0.1, `total_time should stop at exit: ${JSON.stringify(r2.details)}`);
+		await assert.rejects(() => h.call("write_stdin", { session_id: sid }), /unknown session_id/);
 		await h.emit("session_shutdown");
 	});
 
@@ -240,7 +243,8 @@ describe("unified-exec e2e", () => {
 			const r2 = await h.call("write_stdin", { session_id: sid, chars: "", yield_time_ms: 2_000_000 });
 			assert.ok(performance.now() - start < 10_000);
 			assert.equal(r2.details.yield_time_ms, 2_000_000);
-			assert.equal(r2.details.session_id, undefined);
+			assert.equal(r2.details.session_id, sid);
+			assert.equal(r2.details.running, false);
 			assert.equal(r2.details.exit_code, 0);
 			assert.equal(r2.details.wait_mode, "relative");
 			assert.equal(r2.details.wait_status, "completed");
@@ -280,7 +284,8 @@ describe("unified-exec e2e", () => {
 				yield_time_ms: 10_000,
 			});
 			assert.equal(r2.details.yield_time_ms, 10_000);
-			assert.equal(r2.details.session_id, undefined);
+			assert.equal(r2.details.session_id, sid);
+			assert.equal(r2.details.running, false);
 			assert.equal(r2.details.exit_code, 0);
 		} finally {
 			if (previous === undefined) delete process.env[MAX_EMPTY_POLL_ENV_VAR];
@@ -310,7 +315,8 @@ describe("unified-exec e2e", () => {
 			yield_time_ms: 5000,
 		});
 		assert.equal(r2.details.exit_code, 0, `r2=${JSON.stringify(r2.details)}`);
-		assert.equal(r2.details.session_id, undefined);
+		assert.equal(r2.details.session_id, sid);
+		assert.equal(r2.details.running, false);
 		assert.ok(r2.details.output.includes("tick 5"), `second out: ${r2.details.output}`);
 		await h.emit("session_shutdown");
 	});
@@ -344,7 +350,7 @@ describe("unified-exec e2e", () => {
 		});
 		// Some environments need stdin.end() instead of \x04; in pipe mode \x04 won't EOF.
 		// If r3 is still running, force kill to clean up.
-		if (r3.details.session_id !== undefined) {
+		if (r3.details.running) {
 			await h.call("kill_session", { session_id: sid });
 		}
 		await h.emit("session_shutdown");
@@ -511,7 +517,8 @@ describe("unified-exec e2e", () => {
 
 		const r2 = await h.call("write_stdin", { session_id: sid, chars: "", yield_time_ms: 5000 });
 		assert.equal(r2.details.exit_code, 0, `details=${JSON.stringify(r2.details)}`);
-		assert.equal(r2.details.session_id, undefined);
+		assert.equal(r2.details.session_id, sid);
+		assert.equal(r2.details.running, false);
 		await h.emit("session_shutdown");
 	});
 
@@ -705,6 +712,8 @@ describe("unified-exec e2e", () => {
 			const finished = await h.call("write_stdin", { session_id: started.details.session_id, chars: "go\n", yield_time_ms: 2000 });
 			assert.equal(finished.details.exit_code, 0);
 			assert.equal(finished.details.output, "b");
+			assert.equal(finished.structuredContent?.details.session_id, started.details.session_id);
+			assert.equal(finished.structuredContent?.details.running, false);
 			const log = finished.details.log;
 			assert.ok(Number.isSafeInteger(log) && log > 0);
 			assert.equal(finished.structuredContent?.details.log, log);
@@ -837,11 +846,13 @@ describe("unified-exec e2e", () => {
 		assert.ok(typeof sid === "number", JSON.stringify(r1.details));
 		// First write hits EPIPE asynchronously; must be swallowed, not crash.
 		const r2 = await h.call("write_stdin", { session_id: sid, chars: "hello\n", yield_time_ms: 300 });
-		assert.ok(r2.details.session_id === sid || r2.details.exit_code !== undefined, JSON.stringify(r2.details));
+		assert.equal(r2.details.session_id, sid);
 		// By now the stdin stream is destroyed; a follow-up write should report
 		// the failure instead of silently dropping the bytes.
-		const r3 = await h.call("write_stdin", { session_id: sid, chars: "again\n", yield_time_ms: 300 });
-		if (r3.details.session_id !== undefined) {
+		const r3 = r2.details.running
+			? await h.call("write_stdin", { session_id: sid, chars: "again\n", yield_time_ms: 300 })
+			: r2;
+		if (r3.details.running) {
 			// On Windows, writes to a pipe whose reader closed don't fail
 			// deterministically (bytes can sit in the pipe buffer without an
 			// error), so the failure note may legitimately never appear. The

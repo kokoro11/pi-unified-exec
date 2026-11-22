@@ -34,6 +34,7 @@ function assertPlainJson(value: unknown): void {
 function processInput(overrides: Partial<Parameters<typeof finalizeProcessResult>[0]> = {}) {
 	return {
 		operation: "exec_command" as const,
+		running: false,
 		wallTimeSec: 0.25,
 		collected: encoder.encode("hello\nworld\n"),
 		sessionId: undefined,
@@ -86,7 +87,7 @@ describe("script result projections", () => {
 	});
 
 	it("running process exposes session_id; non-zero exit and signal are typed", () => {
-		const running = processScriptResult(finalizeProcessResult(processInput({ sessionId: 3, exitCode: undefined })));
+		const running = processScriptResult(finalizeProcessResult(processInput({ running: true, sessionId: 3, exitCode: undefined })));
 		assert.ok(Value.Check(processScriptResultSchema, running));
 		assert.equal(running.details.status, "running");
 		assert.equal(running.details.session_id, 3);
@@ -277,7 +278,7 @@ export default function(pi) {
 			const summaryText = output.match(/^\{"exit_code".*\}$/m)?.[0];
 			assert.ok(summaryText, output);
 			assert.deepEqual(JSON.parse(summaryText), { exit_code: 0, lines: 40, log: 1, declared: true });
-			assert.match(output, /^\[exited\]\nexit_code: 0\n/m);
+			assert.match(output, /^\[exited ok\]\n/m);
 			assert.match(output, /^log: 1$/m);
 			assert.match(output, /\n---\nline of build output number 1\n/);
 			assert.match(output, /^line of build output number 40$/m);

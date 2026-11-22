@@ -12,7 +12,7 @@
  * Semantics:
  *   - Every exec_command starts a long-lived session. If the process is still
  *     alive when the call's yield deadline expires, the tool returns with
- *     `session_id` in its body and the LLM can follow up with write_stdin.
+ *     `[running #N]` and the LLM can follow up with write_stdin.
  *   - `write_stdin` with empty `chars` is a pure poll; with non-empty, it also
  *     writes the bytes (including \\x03 for Ctrl-C, \\x04 for EOF).
  *   - Aborting the tool call (Esc) breaks the wait but does not kill the
@@ -320,6 +320,7 @@ async function runExecCommand(
 		return finalizeResponse({
 			wallTimeSec: 0,
 			collected: new Uint8Array(0),
+			running: false,
 			sessionId: undefined,
 			exitCode: -1,
 			signal: null,
@@ -357,6 +358,7 @@ async function runExecCommand(
 				wallTimeSec: wallSec,
 				collected: collected.bytes,
 				omittedBytes: collected.omittedBytes,
+				running: false,
 				sessionId: undefined,
 				exitCode: session.exitCode,
 				signal: session.signal,
@@ -416,6 +418,7 @@ async function runExecCommand(
 				wallTimeSec: wallSec,
 				collected: collected.bytes,
 				omittedBytes: collected.omittedBytes,
+				running: true,
 				sessionId: session.id,
 				exitCode: undefined,
 				signal: null,
@@ -440,6 +443,7 @@ async function runExecCommand(
 			wallTimeSec: wallSec,
 			collected: collected.bytes,
 			omittedBytes: collected.omittedBytes,
+			running: false,
 			sessionId: undefined,
 			exitCode: session.exitCode,
 			signal: session.signal,
@@ -468,8 +472,8 @@ async function runWriteStdin(
 	onUpdate: AgentToolUpdateCallback<ProcessUpdateDetails> | undefined,
 	toolCallId: string,
 ): Promise<ResponseShape> {
-	const finalizeResponse = (input: FinalizeInput): ResponseShape =>
-		finalizeProcessResult({ ...input, operation: "write_stdin" });
+	const finalizeResponse = (input: Omit<FinalizeInput, "sessionId">): ResponseShape =>
+		finalizeProcessResult({ ...input, operation: "write_stdin", sessionId: session.id });
 	const writeBytes = resolveWriteInput(args);
 	const isEmptyPoll = writeBytes === undefined || writeBytes.length === 0;
 	const yieldUntil = args.yield_until;
@@ -524,7 +528,7 @@ async function runWriteStdin(
 					wallTimeSec: wallSec,
 					collected: collected.bytes,
 					omittedBytes: collected.omittedBytes,
-					sessionId: undefined,
+					running: false,
 					exitCode: session.exitCode,
 					signal: session.signal,
 					failure: session.failureMessage,
@@ -560,7 +564,7 @@ async function runWriteStdin(
 				wallTimeSec: wallSec,
 				collected: collected.bytes,
 				omittedBytes: collected.omittedBytes,
-				sessionId: undefined,
+				running: false,
 				exitCode: session.exitCode,
 				signal: session.signal,
 				failure: session.failureMessage ?? writeFailure,
@@ -580,7 +584,7 @@ async function runWriteStdin(
 			wallTimeSec: wallSec,
 			collected: collected.bytes,
 			omittedBytes: collected.omittedBytes,
-			sessionId: session.id,
+			running: true,
 			exitCode: undefined,
 			signal: null,
 			failure: writeFailure,
@@ -683,7 +687,8 @@ async function runAttachedWait(
 			wallTimeSec: elapsedMs / 1000,
 			collected: collected.bytes,
 			omittedBytes: collected.omittedBytes,
-			sessionId: outcome === "exit" ? undefined : session.id,
+			running: outcome !== "exit",
+			sessionId: session.id,
 			exitCode: outcome === "exit" ? session.exitCode : undefined,
 			signal: outcome === "exit" ? session.signal : null,
 			failure: outcome === "exit" ? session.failureMessage : null,
@@ -1106,7 +1111,7 @@ export default function (pi: ExtensionAPI) {
 		name: "exec_command",
 		label: "exec_command",
 		description:
-			'Run a command in a persistent session. Returns `session_id` if still running (drive with write_stdin) or `exit_code` if it finished within yield_time_ms. on_exit defaults to "none". Only pass on_exit: "wake" when the human explicitly wants auto-resume on unobserved exit — stale wakes interrupt later work. Use set_on_exit to disarm or re-arm a running session. ' +
+			'Run a command in a persistent session. `[running #N]` means pass N as session_id to write_stdin; `[exited ok]` or `[exited error N]` means the command finished. on_exit defaults to "none". Only pass on_exit: "wake" when the human explicitly wants auto-resume on unobserved exit — stale wakes interrupt later work. Use set_on_exit to disarm or re-arm a running session. ' +
 			PROCESS_CODEMODE_GUIDANCE,
 		promptSnippet: "Run a shell command; long-running ones yield a session_id",
 		promptGuidelines: [
@@ -1169,7 +1174,7 @@ export default function (pi: ExtensionAPI) {
 		name: "write_stdin",
 		label: "write_stdin",
 		description:
-			"Write bytes to a running session. Omit both chars and chars_b64 to poll without writing. Use `chars` for text with C-style escapes (e.g. \\x03 Ctrl-C, \\x1b ESC, \\n newline); use `chars_b64` for raw binary. For empty polls, wait with a finite yield_time_ms (relative, no built-in maximum) or yield_until (absolute UTC deadline, only when the human explicitly asks). " +
+			"Write bytes to a running session. Omit both chars and chars_b64 to poll without writing. Use `chars` for text with C-style escapes (e.g. \\x03 Ctrl-C, \\x1b ESC, \\n newline); use `chars_b64` for raw binary. For empty polls, wait with a finite yield_time_ms (relative, no built-in maximum) or yield_until (absolute UTC deadline, only when the human explicitly asks). The reply keeps the session ID at exit; only poll again if it reports `[running #N]`. " +
 			PROCESS_CODEMODE_GUIDANCE,
 		promptSnippet: "Send input to or poll a running session",
 		promptGuidelines: [

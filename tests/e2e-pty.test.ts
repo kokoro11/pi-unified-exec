@@ -111,7 +111,7 @@ describe.skipIf(!isPtyAvailable())("unified-exec PTY mode", () => {
 			for (let i = 0; i < 3 && !output.includes("42"); i++) {
 				const poll = await h.call("write_stdin", { session_id: sid, yield_time_ms: 5000 });
 				output += poll.details.output;
-				if (poll.details.session_id === undefined) break; // REPL died
+				if (!poll.details.running) break; // REPL died
 			}
 			assert.ok(output.includes("42"), `got: ${output}`);
 
@@ -146,7 +146,7 @@ describe.skipIf(!isPtyAvailable())("unified-exec PTY mode", () => {
 			for (let i = 0; i < 2 && !output.includes("GOT:hello|"); i++) {
 				const poll = await h.call("write_stdin", { session_id: sid, yield_time_ms: 5000 });
 				output += poll.details.output;
-				if (poll.details.session_id === undefined) break;
+				if (!poll.details.running) break;
 			}
 			assert.ok(output.includes("GOT:hello|"), `PTY input did not round-trip: ${JSON.stringify(output)}`);
 
@@ -155,12 +155,10 @@ describe.skipIf(!isPtyAvailable())("unified-exec PTY mode", () => {
 			assert.ok(live?.pid > 0, `connected PTY has no process ID: ${JSON.stringify(live)}`);
 
 			const r3 = await h.call("write_stdin", { session_id: sid, chars: "quit\r", yield_time_ms: 3000 });
-			let exitCode = r3.details.exit_code;
-			if (r3.details.session_id !== undefined) {
-				const poll = await h.call("write_stdin", { session_id: sid, yield_time_ms: 5000 });
-				exitCode = poll.details.exit_code;
-			}
-			assert.equal(exitCode, 7, `fixture did not exit on quit: ${JSON.stringify(r3.details)}`);
+			const finished = r3.details.running ? await h.call("write_stdin", { session_id: sid, yield_time_ms: 5000 }) : r3;
+			assert.equal(finished.details.exit_code, 7, `fixture did not exit on quit: ${JSON.stringify(finished.details)}`);
+			assert.equal(finished.details.session_id, sid);
+			assert.ok(finished.content[0].text.startsWith(`[exited #${sid} error 7]\n`));
 		} finally {
 			await h.emit("session_shutdown");
 		}
@@ -219,7 +217,7 @@ describe.skipIf(!isPtyAvailable())("unified-exec PTY mode", () => {
 				yield_time_ms: 1000,
 			});
 			// Session should exit (bash gets SIGINT from terminal).
-			if (r2.details.session_id !== undefined) {
+			if (r2.details.running) {
 				// Some shells ignore SIGINT for background; fall back to kill.
 				await h.call("kill_session", { session_id: sid });
 			}

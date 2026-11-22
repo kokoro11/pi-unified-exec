@@ -138,6 +138,7 @@ describe("unified-exec renderers", () => {
 		const state: Record<string, unknown> = {};
 		const firstDetails = finalizeProcessResult({
 			operation: "write_stdin",
+			running: true,
 			wallTimeSec: 0.1,
 			collected: encoder.encode(Array.from({ length: 8 }, (_, index) => `old-${index + 1}`).join("\n")),
 			sessionId: 3,
@@ -155,6 +156,7 @@ describe("unified-exec renderers", () => {
 
 		const nextDetails = finalizeProcessResult({
 			operation: "write_stdin",
+			running: true,
 			wallTimeSec: 0.2,
 			collected: encoder.encode(Array.from({ length: 8 }, (_, index) => `new-${index + 1}`).join("\n")),
 			sessionId: 3,

@@ -51,7 +51,7 @@ export default function (pi) {
 			const result = context.messages.find(m => m.role === "toolResult" && m.toolName === "exec_command");
 			const text = result?.role === "toolResult"
 				? result.content.filter(p => p.type === "text").map(p => p.text).join("\n") : "";
-			const match = /^session_id: (\d+)/m.exec(text);
+			const match = /^\[running #(\d+)\]/.exec(text);
 			if (!match) throw new Error(`Expected a running session: ${text}`);
 			return fauxAssistantMessage(fauxToolCall("write_stdin", {
 				session_id: Number(match[1]), yield_time_ms: 900_000,

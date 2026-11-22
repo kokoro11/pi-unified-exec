@@ -123,22 +123,24 @@ Runs a command in a persistent session.
 Response body (short output, no truncation):
 
 ```
-[still running]                     (or [exited])
-session_id: 1                       (mutually exclusive with exit_code)
-exit_code: 0                        (mutually exclusive with session_id)
-signal: SIGTERM                     (optional, if killed)
-log: 1  (only once cumulative output reaches 512 bytes)
+[running #1]
+log: 1
 wall_time: 502ms
-omitted_bytes: 3145728              (only present when in-memory retention drops middle bytes)
 ---
 <captured stdout+stderr>
 ```
 
+Use the number in `[running #1]` as the `session_id` for the next call.
+A command that finishes during `exec_command` reports `[exited ok]` for
+exit code 0 or `[exited error 2]` for exit code 2. With no numeric exit
+code, the header is `[exited error]` and any signal or failure is listed
+below it.
+
 `wall_time` uses rounded integer milliseconds below one second, four significant
 digits from one to under 1000 seconds (`1.234s`, `567.8s`), omitting trailing
 decimal zeroes (`1s`, `1.2s`), and rounded whole
-seconds from 1000 seconds onward (`12345s`). Structured `details.wall_time_seconds`
-remains numeric for scripts.
+seconds from 1000 seconds onward (`12345s`). If it rounds to `0ms`, the line
+is omitted. Structured `details.wall_time_seconds` remains numeric for scripts.
 
 If a chatty process produces more than the 1 MiB in-memory retention between
 polls, the middle is dropped and a marker is spliced at the exact omission
@@ -158,7 +160,10 @@ When output exceeds the caps (50 KiB / 2000 lines), a footer is appended:
 
 ### `write_stdin`
 
-Drives or polls an existing session.
+Drives or polls an existing session. The final result keeps the session ID
+in the header (for example, `[exited #1 ok]` or `[exited #1 error 2]`) and in
+`details.session_id`. Continue polling only when `details.running` is true
+or the reply starts with `[running #N]`.
 
 | Param | Type | Default | Notes |
 |---|---|---|---|
@@ -577,8 +582,8 @@ PREVIEW_LINES                = 5       (visual TUI lines before app.tools.expand
   store. The response has `exit_code`, no `session_id`.
 - **Session persistence between calls**: if a process exits after a tool call
   returns but before the next one, the session stays in the store. The next
-  `write_stdin(session_id, …)` call will observe the exit and return
-  `exit_code`, then remove the session; `list_sessions` reports it once with
+  `write_stdin(session_id, …)` call will report the session ID and exit info,
+  then remove the session; `list_sessions` reports it once with
   exit info before removing it. (Matches codex's `refresh_process_state`
   pattern.)
 - **Spawn failures are diagnosable**: a nonexistent shell binary or `workdir`
@@ -588,7 +593,7 @@ PREVIEW_LINES                = 5       (visual TUI lines before app.tools.expand
   pipe reaches EOF — the shell's own exit is not enough. Background
   processes that inherited stdout/stderr (or a backgrounded `cd … && cmd &`
   chain whose subshell keeps waiting) hold the pipe open, so the session
-  stays `[still running]` after its shell is gone. Such results carry a
+  stays `[running #N]` after its shell is gone. Such results carry a
   `note` explaining the state and how to detach (`(cd dir && cmd >log 2>&1
   </dev/null) &`, `setsid cmd >log 2>&1 </dev/null &`) or end it with
   `kill_session`; `list_sessions` marks them `(shell exited, pipe held)`.
@@ -657,19 +662,17 @@ docs/
 
 ```
 > exec_command(cmd="npm run dev", yield_time_ms=5000)
-[still running]
-session_id: 1
+[running #1]
 ---
 > Server listening on :3000
 
 > exec_command(cmd="curl -s localhost:3000/health", yield_time_ms=2000)
-[exited]
-exit_code: 0
+[exited ok]
 ---
 {"ok": true}
 
 > write_stdin(session_id=1, chars="", yield_time_ms=10000)      # poll dev server
-[still running]
+[running #1]
 ---
   GET /health 200 in 3ms
 
@@ -681,8 +684,7 @@ Killed session 1 (pid 12345) with SIGTERM — exit_code=143
 
 ```
 > exec_command(cmd="bun run test", yield_time_ms=1000, on_exit="wake")
-[still running]
-session_id: 2
+[running #2]
 on_exit: wake
 completion_notification: armed
 wall_time: 1s
@@ -690,8 +692,7 @@ wall_time: 1s
 > test suite started
 
 > write_stdin(session_id=2, yield_until="2026-07-21T10:30:00Z")  # only if human asked for long attach
-[exited]
-exit_code: 0
+[exited #2 ok]
 on_exit: wake
 wall_time: 14s
 total_time: 15s
@@ -718,34 +719,30 @@ process exits — unless you `set_on_exit … none` first.
 
 ```
 > exec_command(cmd="python3 -q", tty=true, yield_time_ms=1500)
-[still running]
-session_id: 1
+[running #1]
 ---
 >>>
 
 > write_stdin(session_id=1, chars="print(7*6)\r", yield_time_ms=1000)     # \r = Enter (portable; \n fails on Windows)
-[still running]
+[running #1]
 ---
 42
 >>>
 
 > write_stdin(session_id=1, chars="exit()\r", yield_time_ms=1000)
-[exited]
-exit_code: 0
+[exited #1 ok]
 ```
 
 ### 4. `sudo` (interactive password)
 
 ```
 > exec_command(cmd="sudo -k && sudo whoami", tty=true, yield_time_ms=1500)
-[still running]
-session_id: 1
+[running #1]
 ---
 [sudo] password for wr:
 
 > write_stdin(session_id=1, chars="<password>\r", yield_time_ms=2000)
-[exited]
-exit_code: 0
+[exited #1 ok]
 ---
 root
 ```

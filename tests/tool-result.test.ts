@@ -15,6 +15,7 @@ describe("bounded tool results", () => {
 	it("preserves the existing process response contract with explicit operation state", () => {
 		const details = finalizeProcessResult({
 			operation: "exec_command",
+			running: true,
 			wallTimeSec: 0.25,
 			collected: encoder.encode("hello\nworld\n"),
 			sessionId: 7,
@@ -35,8 +36,23 @@ describe("bounded tool results", () => {
 		assert.equal(details.output, "hello\nworld\n");
 		assert.equal(
 			renderProcessResultText(details),
-			"[still running]\nsession_id: 7\nlog: 1\nwall_time: 250ms\n---\nhello\nworld\n",
+			"[running #7]\nlog: 1\nwall_time: 250ms\n---\nhello\nworld\n",
 		);
+	});
+
+	it("shows an exit without a numeric code and omits a rounded-zero wall time", () => {
+		const details = finalizeProcessResult({
+			operation: "write_stdin",
+			running: false,
+			wallTimeSec: 0.0004,
+			collected: encoder.encode("stopped"),
+			sessionId: 17,
+			exitCode: null,
+			signal: "SIGTERM",
+			failure: null,
+			tty: false,
+		});
+		assert.equal(renderProcessResultText(details), "[exited #17 error]\nsignal: SIGTERM\n---\nstopped");
 	});
 
 	it("bounds kill output and puts the recovery marker in model-visible text", () => {
@@ -78,6 +94,7 @@ describe("bounded tool results", () => {
 		const huge = `bad\x1b]52;c;payload\x07${"x".repeat(100_000)}`;
 		const details = finalizeProcessResult({
 			operation: "exec_command",
+			running: false,
 			wallTimeSec: 0,
 			collected: encoder.encode("small output"),
 			sessionId: undefined,
@@ -91,6 +108,7 @@ describe("bounded tool results", () => {
 
 		assert.ok(Buffer.byteLength(text, "utf8") < 12_000, `text bytes=${Buffer.byteLength(text)}`);
 		assert.doesNotMatch(text, /[\u001b\u009b]/);
+		assert.match(text, /^\[exited error -1\]\n/);
 		assert.match(text, /…/);
 	});
 
@@ -98,6 +116,7 @@ describe("bounded tool results", () => {
 		const dangerous = "before\x1b]52;c;YXR0YWNrZXI=\x07after\x1b[?1049h";
 		const details = finalizeProcessResult({
 			operation: "write_stdin",
+			running: true,
 			wallTimeSec: 0.1,
 			collected: encoder.encode(dangerous),
 			sessionId: 5,
@@ -113,7 +132,7 @@ describe("bounded tool results", () => {
 
 	it("represents a failed kill as a live, retained session", () => {
 		const details = finalizeKillResult({
-			wallTimeSec: 2.5,
+			wallTimeSec: 0,
 			collected: encoder.encode("last diagnostic\n"),
 			sessionId: 9,
 			pid: 999,
@@ -133,6 +152,7 @@ describe("bounded tool results", () => {
 		const text = renderKillResultText(details);
 		assert.match(text, /^\[kill failed\]/);
 		assert.match(text, /running: true/);
+		assert.doesNotMatch(text, /^wall_time:/m);
 		assert.match(text, /session remains registered/);
 	});
 });

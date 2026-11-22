@@ -41,7 +41,7 @@ const processScriptDetailsSchema = Type.Object({
 	status: Type.Union([Type.Literal("running"), Type.Literal("exited")]),
 	running: Type.Boolean(),
 	session_id: Type.Optional(
-		Type.Number({ description: "Present while the process is still running; drive it with write_stdin." }),
+		Type.Number({ description: "Session ID, retained on write_stdin exit results. Check running before polling again." }),
 	),
 	...outputFields,
 	total_time_seconds: Type.Optional(Type.Number({
