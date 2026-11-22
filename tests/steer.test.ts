@@ -239,8 +239,8 @@ describe("steer interrupt e2e", () => {
 		assert.equal(r.details.wait_status, "interrupted_by_steer");
 
 		await h.deliver();
-		const r2 = await h.call("write_stdin", { session_id: sid, chars: "", yield_time_ms: 5000 });
-		assert.equal(r2.details.wait_status, "relative_deadline_reached");
+		const r2 = await h.call("write_stdin", { session_id: sid, yield_until: new Date().toISOString() });
+		assert.equal(r2.details.wait_status, "absolute_deadline_reached");
 	});
 
 	it("releases every parallel wait in the batch", async () => {
@@ -325,8 +325,8 @@ describe("steer interrupt e2e", () => {
 			const sid = await startLongJob(h);
 			await h.steer();
 			await sleep(30);
-			const r = await h.call("write_stdin", { session_id: sid, yield_time_ms: 5000 });
-			assert.equal(r.details.wait_status, "relative_deadline_reached");
+			const r = await h.call("write_stdin", { session_id: sid, yield_until: new Date().toISOString() });
+			assert.equal(r.details.wait_status, "absolute_deadline_reached");
 		} finally {
 			delete process.env[STEER_INTERRUPT_ENV];
 		}

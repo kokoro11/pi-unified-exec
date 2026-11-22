@@ -50,12 +50,12 @@ Verify the install:
 
 ```bash
 bun run check                       # clean strict typecheck
-bun run test                        # typecheck + all tests, including TUI when tmux is available
+bun run test                        # typecheck + all tests in two isolated Bun workers
 ```
 
-Expect `0 fail`. Some cases are platform-specific. The Python REPL case
-skips without a real `python3`, and the TUI cases skip on Windows or without
-tmux.
+Expect `0 fail`. Some cases are platform-specific. The PTY round trip uses
+a Node fixture; it needs no Python install. TUI cases skip on Windows or
+without tmux.
 
 ## Repo layout
 
@@ -132,13 +132,12 @@ pi -p --mode json --provider anthropic --model claude-sonnet-4 \
 # Pure units (fast, no subprocesses)
 bun test ./tests/head-tail-buffer.test.ts \
          ./tests/notify.test.ts \
-         ./tests/truncate.test.ts \
+         ./tests/tool-result.test.ts \
          ./tests/unescape.test.ts \
          ./tests/session-store.test.ts
 
 # End-to-end against real bash / cat (seconds)
 bun test --timeout 30000 ./tests/e2e.test.ts
-bun test --timeout 30000 ./tests/chars-encoding.test.ts
 
 # PTY-backed (requires @homebridge/node-pty-prebuilt-multiarch to have loaded)
 bun test --timeout 30000 ./tests/e2e-pty.test.ts
@@ -330,7 +329,7 @@ upgrade verify that session-start registration still shadows the loaded
 configured packages precede built-ins), the legacy-exclusion `defaultTools`
 activation, exact parameter-schema identity, inactive default, mode/budget
 loadout, nested/model helpers, store persistence and cached renderer shape.
-Run both codemode test files and actual tmux expansion/collapse; a silent
+Run the codemode unit/CLI tests and actual tmux expansion/collapse; a silent
 generic fallback is a failure, not acceptable compatibility.
 
 If an upstream changelog entry mentions **none** of the symbols above,

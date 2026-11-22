@@ -4,6 +4,9 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Speed up the test suite with two isolated Bun workers, fewer duplicate Pi CLI launches, and immediate polls where the test only inspects the result. Keep real CLI coverage for long waits with cache warming enabled or vetoed and for Codemode parity, activation, and MCP.
+- Consolidate byte-input tests around real pipe round trips. Keep the Node PTY round trip and Windows-specific ConPTY regressions, and remove the redundant Python REPL, unchecked PTY interrupt probe, and tests of Pi's standalone truncation helpers.
+- On Windows, the full test command including typecheck went from about 3m30s to 1m18s. All 331 applicable tests passed with PTY required; 28 platform-specific cases skipped.
 - Use compact process headers (`[running #N]`, `[exited ok]`, or `[exited error CODE]`) and omit `wall_time` when it rounds to `0ms`. Final `write_stdin` results keep their session ID in the header and structured details; check `running` before polling again.
 - Show `wait_status` in formatted replies only when a wait is cancelled or interrupted by a steer; keep normal outcomes in structured results. Remove `tool_time_utc` from tool results and report `current_utc_time` on `yield_until` validation errors.
 - Report `total_time` on `write_stdin` results (`details.total_time_seconds` in scripts). It measures the session from launch until exit, while `wall_time` measures the current call.

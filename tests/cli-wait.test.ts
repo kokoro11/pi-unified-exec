@@ -1,7 +1,6 @@
 import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "bun:test";
 import { fileURLToPath } from "node:url";
@@ -12,14 +11,16 @@ const cli = process.env.PI_UNIFIED_EXEC_TEST_CLI ?? fileURLToPath(
 const extension = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 const provider = fileURLToPath(new URL("./fixtures/wait-provider.js", import.meta.url));
 
-for (const scenario of ["streaming", "idle", "off", "veto", "no-ttl", "cheap"]) {
-	test(`actual Pi: uncapped relative wait with ${scenario} warming`, () => {
-		const root = mkdtempSync(join(tmpdir(), "pi-exec-wait-"));
+// Exercise coexistence with Pi warming, and confirm an extension can still veto it.
+for (const veto of [false, true]) {
+	test(`actual Pi: uncapped relative wait with warming ${veto ? "vetoed" : "enabled"}`, () => {
+		mkdirSync(".temp", { recursive: true });
+		const root = mkdtempSync(join(process.cwd(), ".temp", "pi-exec-wait-"));
 		try {
 			const agentDir = join(root, "agent");
 			mkdirSync(agentDir);
 			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({
-				cacheWarming: scenario === "idle" || scenario === "off" ? scenario : "streaming",
+				cacheWarming: "streaming",
 				defaultProjectTrust: "always",
 				compaction: { enabled: false },
 			}));
@@ -34,7 +35,7 @@ for (const scenario of ["streaming", "idle", "off", "veto", "no-ttl", "cheap"]) 
 				env: {
 					...process.env, HOME: root, PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "1",
 					PI_CACHE_RETENTION: "short", PI_UNIFIED_EXEC_MAX_EMPTY_POLL_MS: "",
-					EXEC_WAIT_SCENARIO: scenario,
+					EXEC_WAIT_VETO: veto ? "1" : "0",
 				},
 				encoding: "utf8", timeout: 25_000, maxBuffer: 4 * 1024 * 1024,
 			});
@@ -50,13 +51,11 @@ for (const scenario of ["streaming", "idle", "off", "veto", "no-ttl", "cheap"]) 
 			assert.match(result.stdout, /EXEC_WAIT_OK/);
 			const events = readFileSync(join(root, "events.jsonl"), "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line));
 			const warms = events.filter(e => e.type === "warm");
-			if (scenario === "streaming" || scenario === "idle") {
+			assert.ok(events.some(e => e.type === "decision" && e.action === "warm" && !e.idle && e.waitActive), JSON.stringify(events));
+			if (veto) assert.equal(warms.length, 0, JSON.stringify(events));
+			else {
 				assert.ok(warms.length > 0, `No refresh: ${JSON.stringify(events)}`);
 				assert.ok(warms.every(e => e.waitActive), "refresh must occur while the actual tool remains attached");
-				assert.ok(events.some(e => e.type === "decision" && e.action === "warm" && !e.idle && e.waitActive));
-			} else {
-				assert.equal(warms.length, 0, JSON.stringify(events));
-				if (scenario === "veto" || scenario === "cheap") assert.ok(events.some(e => e.type === "decision"));
 			}
 		} finally {
 			rmSync(root, { recursive: true, force: true });

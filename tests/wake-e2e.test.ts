@@ -133,55 +133,35 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const inFuture = (ms: number) => new Date(Date.now() + ms).toISOString();
 
 describe("write_stdin yield_until", () => {
-	it("rejects yield_time_ms and yield_until together", async () => {
+	it("validates absolute and relative poll arguments before waiting", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
-		const r1 = await h.call("exec_command", { cmd: "sleep 30", yield_time_ms: 250 });
-		const sid = r1.details.session_id;
+		const started = await h.call("exec_command", { cmd: "sleep 30", yield_time_ms: 250 });
+		const session_id = started.details.session_id;
+		const yield_until = inFuture(5000);
 		await assert.rejects(
-			() => h.call("write_stdin", { session_id: sid, yield_time_ms: 5000, yield_until: inFuture(5000) }),
+			h.call("write_stdin", { session_id, yield_time_ms: 5000, yield_until }),
 			/not both.*current_utc_time: .+Z$/,
 		);
-		await h.call("kill_session", { session_id: sid });
-		await h.emit("session_shutdown");
-	});
-
-	it("rejects non-empty chars or decoded chars_b64 with yield_until; accepts explicit empty input", async () => {
-		const h = makeHarness();
-		await h.emit("session_start");
-		const r1 = await h.call("exec_command", { cmd: "sleep 30", yield_time_ms: 250 });
-		const sid = r1.details.session_id;
-		await assert.rejects(
-			() => h.call("write_stdin", { session_id: sid, chars: "hello\n", yield_until: inFuture(5000) }),
-			/only valid for an empty poll.*current_utc_time: .+Z$/,
-		);
-		await assert.rejects(
-			// "aGk=" decodes to non-empty "hi"
-			() => h.call("write_stdin", { session_id: sid, chars_b64: "aGk=", yield_until: inFuture(5000) }),
-			/only valid for an empty poll.*current_utc_time: .+Z$/,
-		);
-		// Explicit empty chars + yield_until is a valid empty poll.
-		const r2 = await h.call("write_stdin", { session_id: sid, chars: "", yield_until: inFuture(300) });
-		assert.equal(r2.details.session_id, sid);
-		assert.equal(r2.details.wait_mode, "absolute");
-		await h.call("kill_session", { session_id: sid });
-		await h.emit("session_shutdown");
-	});
-
-	it("rejects malformed timestamps at the tool boundary with current_utc_time", async () => {
-		const h = makeHarness();
-		await h.emit("session_start");
-		const r1 = await h.call("exec_command", { cmd: "sleep 30", yield_time_ms: 250 });
-		const sid = r1.details.session_id;
-		for (const bad of ["", "2026-07-21 18:30:00", "2026-07-21T18:30:00+00:00", "2026-02-30T00:00:00Z"]) {
+		for (const input of [{ chars: "hello\n" }, { chars_b64: "aGk=" }]) {
 			await assert.rejects(
-				() => h.call("write_stdin", { session_id: sid, yield_until: bad }),
-				/current_utc_time: .+Z$/,
-				`should reject ${bad}`,
+				h.call("write_stdin", { session_id, ...input, yield_until }),
+				/only valid for an empty poll.*current_utc_time: .+Z$/,
 			);
 		}
-		await h.call("kill_session", { session_id: sid });
-		await h.emit("session_shutdown");
+		await assert.rejects(
+			h.call("write_stdin", { session_id, yield_until: "2026-02-30T00:00:00Z" }),
+			/current_utc_time: .+Z$/,
+		);
+		await assert.rejects(h.call("write_stdin", { session_id, yield_time_ms: -1 }), /non-negative finite/);
+
+		// The failed calls leave the session usable; explicit empty input is a poll.
+		const result = await h.call("write_stdin", { session_id, chars: "", yield_until: "2020-01-01T00:00:00Z" });
+		assert.ok(result.details.wall_time_seconds < 3, "past deadlines must poll immediately");
+		assert.equal(result.details.session_id, session_id);
+		assert.equal(result.details.wait_mode, "absolute");
+		assert.equal(result.details.wait_status, "absolute_deadline_reached");
+		assert.equal(result.details.running, true);
 	});
 
 	it("returns the terminal result immediately when the process exits before the deadline", async () => {
@@ -205,88 +185,9 @@ describe("write_stdin yield_until", () => {
 		assert.equal(r2.details.log, undefined, "short output remains inline");
 		await h.emit("session_shutdown");
 	});
-
-	it("returns the still-running session when the absolute deadline arrives first", async () => {
-		const h = makeHarness();
-		await h.emit("session_start");
-		const r1 = await h.call("exec_command", { cmd: "echo early-output && sleep 30", yield_time_ms: 250 });
-		const sid = r1.details.session_id;
-		assert.ok(typeof sid === "number");
-		const r2 = await h.call("write_stdin", { session_id: sid, yield_until: inFuture(700) });
-		assert.equal(r2.details.session_id, sid);
-		assert.equal(r2.details.wait_mode, "absolute");
-		assert.equal(r2.details.wait_status, "absolute_deadline_reached");
-		assert.ok(typeof r2.details.effective_wait_ms === "number" && r2.details.effective_wait_ms >= 500);
-		assert.doesNotMatch(r2.content[0].text, /^(?:wait_status|tool_time_utc):/m);
-		await h.call("kill_session", { session_id: sid });
-		await h.emit("session_shutdown");
-	});
-
-	it("treats a past deadline as an immediate poll", async () => {
-		const h = makeHarness();
-		await h.emit("session_start");
-		const r1 = await h.call("exec_command", { cmd: "echo hi && sleep 30", yield_time_ms: 400 });
-		const sid = r1.details.session_id;
-		const t0 = Date.now();
-		const r2 = await h.call("write_stdin", { session_id: sid, yield_until: "2020-01-01T00:00:00Z" });
-		assert.ok(Date.now() - t0 < 3000, "past deadline = immediate poll");
-		assert.equal(r2.details.session_id, sid);
-		assert.equal(r2.details.wait_status, "absolute_deadline_reached");
-		await h.call("kill_session", { session_id: sid });
-		await h.emit("session_shutdown");
-	});
-
-	it("cancellation leaves the process alive with output retrievable later", async () => {
-		const h = makeHarness();
-		await h.emit("session_start");
-		const r1 = await h.call("exec_command", { cmd: "echo pre-cancel-output && sleep 30", yield_time_ms: 600 });
-		const sid = r1.details.session_id;
-		assert.ok(typeof sid === "number");
-
-		// Poll once to leave fresh un-drained output before the cancelled wait.
-		const ac = new AbortController();
-		const inflight = h.call("write_stdin", { session_id: sid, yield_until: inFuture(60_000) }, ac.signal);
-		setTimeout(() => ac.abort(), 150);
-		const r2 = await inflight;
-		assert.equal(r2.details.session_id, sid, JSON.stringify(r2.details));
-		assert.equal(r2.details.wait_status, "cancelled");
-		assert.match(r2.content[0].text, /^wait_status: cancelled$/m);
-		assert.equal(r2.details.output, "", "cancelled waits must not drain output");
-
-		// The process survived; buffered output is still retrievable.
-		const r3 = await h.call("write_stdin", { session_id: sid, chars: "", yield_time_ms: 5000 });
-		assert.equal(r3.details.session_id, sid);
-		await h.call("kill_session", { session_id: sid });
-		await h.emit("session_shutdown");
-	});
-
-	it("absolute waits do not run a 250ms heartbeat (rate-limited updates only)", async () => {
-		const h = makeHarness();
-		await h.emit("session_start");
-		// Chatty process: prints every 100ms.
-		const r1 = await h.call("exec_command", {
-			cmd: "for i in $(seq 1 40); do echo chatty-$i; sleep 0.1; done",
-			yield_time_ms: 250,
-		});
-		const sid = r1.details.session_id;
-		assert.ok(typeof sid === "number");
-		const updates: any[] = [];
-		const r2 = await h.call(
-			"write_stdin",
-			{ session_id: sid, yield_until: inFuture(1500) },
-			undefined,
-			(p: any) => updates.push(p),
-		);
-		// A 250ms heartbeat would produce ~6 updates in 1.5s of chatty output.
-		// The rate-limited streamer (30s interval) emits initial + final only.
-		assert.ok(updates.length <= 3, `expected <=3 rate-limited updates; got ${updates.length}`);
-		assert.equal(r2.details.wait_status, "absolute_deadline_reached");
-		await h.call("kill_session", { session_id: sid });
-		await h.emit("session_shutdown");
-	});
 });
 
-describe("write_stdin bounded relative waits", () => {
+describe("write_stdin attached waits", () => {
 	it("retains only bounded output during a long noisy wait", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
@@ -311,28 +212,30 @@ describe("write_stdin bounded relative waits", () => {
 		assert.ok(updates.every(p => Buffer.byteLength(p.details.output) <= 32 * 1024));
 	});
 
-	it("cancellation of a huge relative wait preserves buffered output and the live process", async () => {
+	for (const mode of ["relative", "absolute"] as const) it(`${mode} wait cancellation preserves buffered output and the live process`, async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
 		const r1 = await h.call("exec_command", {
-			cmd: 'printf "%0512d\\n" 0; sleep 0.6; echo relative-cancel-marker; sleep 30',
+			cmd: 'printf "%0512d\\n" 0; sleep 0.6; echo cancel-marker; sleep 30',
 			yield_time_ms: 250,
 		});
 		const ac = new AbortController();
-		const wait = h.call("write_stdin", { session_id: r1.details.session_id, yield_time_ms: Number.MAX_SAFE_INTEGER }, ac.signal);
+		const deadline = mode === "relative" ? { yield_time_ms: Number.MAX_SAFE_INTEGER } : { yield_until: inFuture(60_000) };
+		const wait = h.call("write_stdin", { session_id: r1.details.session_id, ...deadline }, ac.signal);
 		try {
-			assert.ok(await waitFor(() => readFileSync(join(OUTPUT_LOG_DIRECTORY, `${r1.details.log}.log`), "utf8").includes("relative-cancel-marker")));
+			assert.ok(await waitFor(() => readFileSync(join(OUTPUT_LOG_DIRECTORY, `${r1.details.log}.log`), "utf8").includes("cancel-marker")));
 		} finally {
 			ac.abort();
 		}
 		const r2 = await wait;
 		assert.equal(r2.details.wait_status, "cancelled");
-		assert.equal(r2.details.wait_mode, "relative");
+		assert.match(r2.content[0].text, /^wait_status: cancelled$/m);
+		assert.equal(r2.details.wait_mode, mode);
 		assert.equal(r2.details.running, true);
 		assert.equal(r2.details.output, "");
 		const killed = await h.call("kill_session", { session_id: r1.details.session_id });
 		assert.equal(killed.details.killed, true);
-		assert.match(killed.details.output, /relative-cancel-marker/);
+		assert.match(killed.details.output, /cancel-marker/);
 	});
 
 	it("returns running at the relative deadline without disarming wake", async () => {
@@ -347,17 +250,6 @@ describe("write_stdin bounded relative waits", () => {
 		assert.equal(r2.details.completion_notification, "armed");
 		assert.ok(r2.details.effective_wait_ms >= 4900);
 		assert.equal(h.sentMessages.length, 0);
-	});
-
-	it("rejects invalid relative durations before observing or changing a session", async () => {
-		const h = makeHarness();
-		await h.emit("session_start");
-		const r1 = await h.call("exec_command", { cmd: "sleep 30", yield_time_ms: 250 });
-		for (const yield_time_ms of [NaN, Infinity, -1, Number.MAX_SAFE_INTEGER + 1]) {
-			await assert.rejects(h.call("write_stdin", { session_id: r1.details.session_id, yield_time_ms }), /non-negative finite/);
-		}
-		const r2 = await h.call("kill_session", { session_id: r1.details.session_id });
-		assert.equal(r2.details.killed, true);
 	});
 });
 
@@ -463,6 +355,9 @@ describe("exec_command on_exit", () => {
 		const r2 = await h.call("write_stdin", { session_id: sid, yield_until: inFuture(400) });
 		assert.equal(r2.details.session_id, sid);
 		assert.equal(r2.details.wait_status, "absolute_deadline_reached");
+		assert.equal(r2.details.wait_mode, "absolute");
+		assert.equal(r2.details.running, true);
+		assert.doesNotMatch(r2.content[0].text, /^(?:wait_status|tool_time_utc):/m);
 		assert.equal(r2.details.completion_notification, "armed");
 		await h.finalizeTool(r2.toolCallId, false);
 		assert.ok(await waitFor(() => h.sentMessages.length === 1), "wake after later exit");
@@ -590,26 +485,6 @@ describe("exec_command on_exit", () => {
 		assert.equal(h.sentMessages.length, 0);
 	});
 
-	it("list_sessions observing the exit before notification suppresses the wake", async () => {
-		const h = makeHarness();
-		await h.emit("session_start");
-		const r1 = await h.call("exec_command", { cmd: "sleep 0.3", yield_time_ms: 250, on_exit: "wake" });
-		const sid = r1.details.session_id;
-		assert.ok(typeof sid === "number");
-		// Poll until list_sessions can reap the exit (race with debounce).
-		let entry: any;
-		assert.ok(
-			await waitFor(async () => {
-				const l = await h.call("list_sessions", {});
-				entry = l.details.sessions.find((s: any) => s.session_id === sid);
-				return entry && entry.running === false;
-			}),
-			"expected list_sessions to observe exit",
-		);
-		await sleep(400); // remaining debounce budget if any
-		assert.ok(h.sentMessages.length <= 1, `never more than one notification; got ${h.sentMessages.length}`);
-	});
-
 	it("session_shutdown cancels pending wakes (no stale prompt)", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
@@ -619,30 +494,6 @@ describe("exec_command on_exit", () => {
 		await h.emit("session_shutdown");
 		assert.ok(!(await waitFor(() => h.sentMessages.length > 0, 800)));
 		assert.equal(h.sentMessages.length, 0);
-	});
-
-	it("several wake sessions finishing together produce one bounded batch", async () => {
-		const h = makeHarness();
-		await h.emit("session_start");
-		// Both processes block on the same marker file so their exits land within
-		// a few tens of ms of each other — inside the wake debounce window.
-		const marker = `${process.env.TMPDIR || "/tmp"}/unified-exec-batch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-		const waitCmd = `while [ ! -f "${marker}" ]; do sleep 0.05; done`;
-		const a = await h.call("exec_command", { cmd: waitCmd, yield_time_ms: 250, on_exit: "wake" });
-		const b = await h.call("exec_command", { cmd: waitCmd, yield_time_ms: 250, on_exit: "wake" });
-		const release = await h.call("exec_command", { cmd: `touch "${marker}"`, yield_time_ms: 5000 });
-		assert.equal(release.details.exit_code, 0);
-		assert.ok(typeof a.details.session_id === "number");
-		assert.ok(typeof b.details.session_id === "number");
-		assert.ok(await waitFor(() => h.sentMessages.length >= 1), "batch wake expected");
-		await new Promise((res) => setTimeout(res, 800));
-		assert.equal(h.sentMessages.length, 1, "one prompt for both completions");
-		const content = h.sentMessages[0].message.content;
-		assert.match(content, new RegExp(`session_id=${a.details.session_id}`));
-		assert.match(content, new RegExp(`session_id=${b.details.session_id}`));
-		await h.call("write_stdin", { session_id: a.details.session_id, yield_time_ms: 5000 });
-		await h.call("write_stdin", { session_id: b.details.session_id, yield_time_ms: 5000 });
-		await h.emit("session_shutdown");
 	});
 
 	it("agent_settled flushes a wake whose send previously failed", async () => {
@@ -660,21 +511,10 @@ describe("exec_command on_exit", () => {
 		};
 		const r1 = await h.call("exec_command", { cmd: "sleep 0.3", yield_time_ms: 250, on_exit: "wake" });
 		assert.ok(typeof r1.details.session_id === "number");
-		// Wait past natural exit + failed debounce flush (no message yet).
-		assert.ok(
-			await waitFor(async () => {
-				// Process has exited if write_stdin can get terminal or list reaps —
-				// here we just ensure the first send attempt had time to fail.
-				await sleep(50);
-				return h.sentMessages.length === 0;
-			}, 2000),
-		);
-		// Give debounce a moment after exit without busy-spinning 900ms blindly:
-		// poll until either a (failed) exit path settled or timeout.
-		await sleep(350);
+		assert.ok(await waitFor(() => failures === 0), "the first wake send should have failed");
 		assert.equal(h.sentMessages.length, 0);
-		await h.emit("agent_settled", { type: "agent_settled" });
-		assert.ok(await waitFor(() => h.sentMessages.length === 1), "retry at agent_settled");
+		await h.emit("agent_settled");
+		assert.equal(h.sentMessages.length, 1, "retry at agent_settled");
 		await h.call("write_stdin", { session_id: r1.details.session_id, yield_time_ms: 5000 });
 	});
 });

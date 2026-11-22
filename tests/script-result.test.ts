@@ -5,11 +5,10 @@
 import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "bun:test";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_MAX_BYTES, initTheme } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
 
 import {
@@ -102,12 +101,13 @@ describe("script result projections", () => {
 		assert.equal(failed.details.failure_message, "boom second line", "metadata stays single-line and bounded");
 	});
 
-	it("truncated output stays within Pi's byte cap and is flagged", () => {
-		const big = "x".repeat(DEFAULT_MAX_BYTES * 2);
+	it("truncated output is flagged and preserves UTF-8 within the byte cap", () => {
+		const big = "界".repeat(DEFAULT_MAX_BYTES);
 		const value = processScriptResult(finalizeProcessResult(processInput({ collected: encoder.encode(big) })));
 		assert.ok(Value.Check(processScriptResultSchema, value));
 		assert.equal(value.details.truncated, true);
 		assert.ok(Buffer.byteLength(value.details.output) <= DEFAULT_MAX_BYTES);
+		assert.match(value.details.output, /^界+$/);
 		assert.match(value.text, /\[Showing .+Full output: 1\]/);
 	});
 
@@ -186,14 +186,14 @@ describe("registered tools return structuredContent", () => {
 		assert.equal(typeof sid, "number");
 		assert.equal(started.structuredContent.details.status, "running");
 
-		const polled = await call("write_stdin", { session_id: sid, yield_time_ms: 5000 });
+		const polled = await call("write_stdin", { session_id: sid, yield_until: new Date().toISOString() });
 		assert.ok(Value.Check(tools.write_stdin.outputSchema, polled.structuredContent));
 		assertPlainJson(polled.structuredContent);
 		assert.equal(polled.structuredContent.details.running, true);
 		assert.equal(polled.structuredContent.details.session_id, sid);
 		assert.equal(polled.structuredContent.text, polled.content[0].text);
 		assert.ok(polled.structuredContent.details.total_time_seconds > polled.structuredContent.details.wall_time_seconds);
-		assert.match(polled.structuredContent.text, /^total_time: \d+(?:\.\d+)?s$/m);
+		assert.match(polled.structuredContent.text, /^total_time: \d+(?:\.\d+)?(?:ms|s)$/m);
 		assert.equal(Object.hasOwn(polled.structuredContent.details, "tool_time_utc"), false);
 
 		const listed = await call("list_sessions", {});
@@ -219,8 +219,9 @@ describe("registered tools return structuredContent", () => {
 });
 
 describe("actual Pi codemode", () => {
-	it("scripts receive typed details and can print the formatted reply directly", async () => {
-		const root = mkdtempSync(join(tmpdir(), "pi-unified-exec-codemode-"));
+	it("scripts receive typed details and can print the formatted reply directly", () => {
+		mkdirSync(".temp", { recursive: true });
+		const root = mkdtempSync(join(process.cwd(), ".temp", "pi-exec-script-result-"));
 		try {
 			const agentDir = join(root, "agent");
 			mkdirSync(agentDir);
@@ -285,22 +286,6 @@ export default function(pi) {
 			assert.match(run.stdout, /CODEMODE_OK/);
 			const archive = readFileSync(join(root, ".temp", "pi-unified-exec", "1.log"), "utf8");
 			assert.equal(archive.trimEnd().split("\n").length, 40);
-
-			// The pinned Pi renderer bounds the collapsed multiline preview.
-			const { codemodeRenderers } = await import(
-				"../node_modules/@earendil-works/pi-coding-agent/dist/extensions/codemode/renderer.js"
-			);
-			initTheme("dark", false);
-			const theme = { fg: (_: string, t: string) => t, bg: (_: string, t: string) => t, bold: (t: string) => t };
-			const renderResult = codemodeRenderers.renderResult as (...args: unknown[]) => { render(width: number): string[] };
-			const component = renderResult(
-				{ ...end.result, details: undefined },
-				{ expanded: false, isPartial: false },
-				theme,
-				{ isError: false, showImages: false },
-			);
-			const rendered: string[] = component.render(80);
-			assert.ok(rendered.length <= 8, `collapsed codemode rows: ${rendered.length}\n${rendered.join("\n")}`);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

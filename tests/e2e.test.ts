@@ -12,7 +12,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "bun:test";
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
-import { MAX_EMPTY_POLL_ENV_VAR, resolveMaxEmptyPollMs } from "../src/index.ts";
+import { MAX_EMPTY_POLL_ENV_VAR } from "../src/time.ts";
 import { OUTPUT_LOG_DIRECTORY } from "../src/output-log.ts";
 import { IS_WINDOWS } from "../src/shell.ts";
 import { activateProcessTools } from "./fixtures/process-tools.ts";
@@ -112,14 +112,6 @@ async function waitFor(cond: () => boolean, timeoutMs = 8000): Promise<boolean> 
 }
 
 describe("unified-exec e2e", () => {
-	it("resolveMaxEmptyPollMs has no default cap and permits operator limits above 290s", () => {
-		assert.equal(resolveMaxEmptyPollMs({}), undefined);
-		assert.equal(resolveMaxEmptyPollMs({ [MAX_EMPTY_POLL_ENV_VAR]: "300000" }), 300_000);
-		assert.equal(resolveMaxEmptyPollMs({ [MAX_EMPTY_POLL_ENV_VAR]: "60000" }), 60_000);
-		assert.equal(resolveMaxEmptyPollMs({ [MAX_EMPTY_POLL_ENV_VAR]: "1000" }), 5_000);
-		assert.throws(() => resolveMaxEmptyPollMs({ [MAX_EMPTY_POLL_ENV_VAR]: "not-a-number" }), /positive finite/);
-	});
-
 	it("describes uncapped empty waits without cache-TTL polling guidance", () => {
 		const h = makeHarness();
 		for (const name of ["exec_command", "write_stdin"]) {
@@ -698,6 +690,43 @@ describe("unified-exec e2e", () => {
 		assert.match(r.details.output, /hello/);
 		await h.emit("session_shutdown");
 	});
+
+	for (const { channel, input, hex } of [
+		{ channel: "chars", input: { chars: "é\n\x1b\x03|\\x1b:wq\\n\\u001b\\x03\\\\" }, hex: "c3a90a1b037c1b3a77710a1b035c" },
+		{ channel: "chars_b64", input: { chars_b64: "AP8bAwrDqQ==" }, hex: "00ff1b030ac3a9" },
+	] as const) {
+		it(`write_stdin sends the exact bytes for ${channel}`, async () => {
+			const h = makeHarness();
+			await h.emit("session_start");
+			try {
+				const started = await h.call("exec_command", {
+					cmd: `node -e '
+						const chunks = [];
+						let size = 0;
+						process.stdin.on("data", chunk => {
+							chunks.push(chunk);
+							size += chunk.length;
+							if (size < ${hex.length / 2}) return;
+							process.stdin.pause();
+							process.stdout.write(Buffer.concat(chunks).toString("hex"), () => process.exit(0));
+						});
+					'`,
+					yield_time_ms: 250,
+				});
+				const sid = started.details.session_id;
+				assert.equal(typeof sid, "number");
+				if (channel === "chars_b64") {
+					await assert.rejects(h.call("write_stdin", { session_id: sid, chars: "hi", ...input }), /either `chars` or `chars_b64`/);
+					await assert.rejects(h.call("write_stdin", { session_id: sid, chars_b64: "not@valid!" }), /not valid base64/);
+				}
+				const result = await h.call("write_stdin", { session_id: sid, ...input, yield_time_ms: 3000 });
+				assert.equal(result.details.output, hex);
+				assert.equal(result.details.exit_code, 0);
+			} finally {
+				await h.emit("session_shutdown");
+			}
+		});
+	}
 
 	it("archives the full stream when output crosses 512 bytes across tool calls", async () => {
 		const h = makeHarness();

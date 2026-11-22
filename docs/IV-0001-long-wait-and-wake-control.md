@@ -33,9 +33,9 @@ or session exit. The host UTC clock is shown as `current_utc_time` only on
 Validation uses `bun run test`, including the actual Pi CLI with a scripted local
 provider in `tests/cli-wait.test.ts`. Its synthetic 12-second cache lifetime
 schedules a refresh after two seconds while a 900,000 ms relative wait remains
-attached to a short real child process. Cases cover streaming/idle/off modes,
-an extension veto, missing cache lifetime and unavailable cost economics.
-No live provider requests are made. `PI_UNIFIED_EXEC_TEST_CLI` selects another
+attached to a short real child process. One case checks that Pi refreshes
+the cache while the wait is attached; the other checks that an extension
+can still veto the refresh. No live provider requests are made. `PI_UNIFIED_EXEC_TEST_CLI` selects another
 published Pi CLI for the same acceptance test.
 
 Observed on macOS, 2026-09-23: `EXPECT_PTY=1 npm test` passes strict types and

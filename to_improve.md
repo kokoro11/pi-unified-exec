@@ -252,8 +252,8 @@ Code references:
   `@mariozechner/pi-coding-agent`, `@mariozechner/pi-tui`, and `typebox`;
   exact dev pins for latest audited versions.
 - `package-lock.json`: resolved dev dependency graph.
-- `tests/truncate.test.ts`: pins behavior imported from
-  `@mariozechner/pi-coding-agent`.
+- `tests/e2e.test.ts` and `tests/script-result.test.ts`: exercise output
+  truncation through the extension's public results.
 - `src/render.ts` and `src/index.ts`: public pi extension and TUI APIs consumed.
 
 Lightweight plan:
