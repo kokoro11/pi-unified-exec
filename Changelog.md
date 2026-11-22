@@ -4,6 +4,7 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Show log numbers as `log=N` in terminal preview footers and expanded session lists. Tool replies and structured fields are unchanged.
 - Move package distribution and repository links to `kokoro11/pi-unified-exec` on GitHub. Disable npm publication and retire the upstream interaction-limit reminder.
 - Shorten the README, move parameters and scripting into the [tool reference](docs/TOOLS.md), and consolidate current maintainer guidance in [Development](docs/DEV.md). Retire the old compatibility audit and workspace documents.
 - Speed up the test suite with two isolated Bun workers, fewer duplicate Pi CLI launches, and immediate polls where the test only inspects the result. Keep real CLI coverage for long waits with cache warming enabled or vetoed and for Codemode parity, activation, and MCP.

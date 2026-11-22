@@ -52,7 +52,7 @@ A wake sends a follow-up with exit metadata and a log number when available. Any
 
 Process and kill results show up to 50 KiB or 2,000 lines of terminal-safe text. More than 1 MiB of output between drains can also leave a gap in the in-memory buffer. Expand a collapsed result with Pi's `app.tools.expand` binding (Ctrl+O by default) to see the full **bounded** result.
 
-At 512 cumulative raw bytes, the extension starts archiving the full stream, including the initial bytes. A result like `log: 4` points to `.temp/pi-unified-exec/4.log` under **Pi's starting directory**, even if the command uses another `workdir`. Smaller output stays inline. Raw logs can contain terminal control sequences; open them with a plain-text reader or hex viewer.
+At 512 cumulative raw bytes, the extension starts archiving the full stream, including the initial bytes. Both `log: 4` in the tool reply and `log=4` in the terminal preview point to `.temp/pi-unified-exec/4.log` under **Pi's starting directory**, even if the command uses another `workdir`. Smaller output stays inline. Raw logs can contain terminal control sequences; open them with a plain-text reader or hex viewer.
 
 ## Codemode
 

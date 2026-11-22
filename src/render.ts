@@ -410,7 +410,7 @@ function buildStatusLine(
 	if (details.wait_status === "cancelled") bits.push(theme.fg("warning", "cancelled"));
 	if (details.wait_status === "interrupted_by_steer") bits.push(theme.fg("accent", "steered"));
 	if (details.completion_notification === "armed") bits.push("wake armed");
-	if (typeof details.log === "number") bits.push(`log: ${details.log}`);
+	if (typeof details.log === "number") bits.push(`log=${details.log}`);
 
 	return theme.fg("muted", bits.join(" · "));
 }
@@ -479,7 +479,7 @@ export function renderListSessionsResult(
 					lines.push(truncateToWidth(line, width, "..."));
 					if (options.expanded && typeof session.log === "number") {
 						lines.push(
-							truncateToWidth(theme.fg("muted", `  log: ${session.log}`), width, "..."),
+							truncateToWidth(theme.fg("muted", `  log=${session.log}`), width, "..."),
 						);
 					}
 				}

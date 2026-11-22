@@ -80,7 +80,7 @@ describe("unified-exec renderers", () => {
 		assert.match(collapsedText, /earlier lines/);
 		assert.match(collapsedText.toLowerCase(), /to expand/);
 		assert.match(collapsedText, /killed session_id=73/);
-		assert.match(collapsedText, /log: 73$/m);
+		assert.match(collapsedText, / · log=73$/m);
 
 		const expanded = renderKillSessionResult(
 			result,
@@ -164,6 +164,7 @@ describe("unified-exec renderers", () => {
 			signal: null,
 			failure: null,
 			tty: false,
+			log: 80,
 			extra: { total_time_seconds: 1.25 },
 		});
 		const nextResult = {
@@ -180,6 +181,7 @@ describe("unified-exec renderers", () => {
 		assert.match(nextText, /new-8/);
 		assert.doesNotMatch(nextText, /old-8/);
 		assert.match(nextText, /total 1\.25s/);
+		assert.match(nextText, / · log=80$/m);
 	});
 
 	it("kill_session unknown-id results are compact errors", () => {
@@ -237,7 +239,7 @@ describe("unified-exec renderers", () => {
 		);
 		const expandedText = rendered(expanded);
 		assert.match(expandedText, /#7 /);
-		assert.match(expandedText, /log: 7$/m);
+		assert.match(expandedText, /^  log=7$/m);
 		assert.doesNotMatch(expandedText, /more sessions/);
 	});
 });
