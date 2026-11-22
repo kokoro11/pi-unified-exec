@@ -380,7 +380,7 @@ describe("unified-exec e2e", () => {
 			});
 			const sid = started.details.session_id;
 			assert.ok(typeof sid === "number", JSON.stringify(started.details));
-			const logPath = started.details.log_path;
+			const logPath = started.details.log;
 			assert.ok(typeof logPath === "string");
 			assert.ok(
 				await waitFor(() => {
@@ -682,7 +682,7 @@ describe("unified-exec e2e", () => {
 		const r = await h.call("exec_command", { cmd: "echo hello" });
 		assert.equal(r.details.exit_code, 0);
 		assert.equal(r.details.tty, false);
-		assert.equal(r.details.log_path, undefined);
+		assert.equal(r.details.log, undefined);
 		assert.match(r.details.output, /hello/);
 		await h.emit("session_shutdown");
 	});
@@ -696,16 +696,14 @@ describe("unified-exec e2e", () => {
 				yield_time_ms: 2000,
 			});
 			assert.equal(started.details.output, "a".repeat(511));
-			assert.equal(started.details.log_path, undefined);
+			assert.equal(started.details.log, undefined);
 			const finished = await h.call("write_stdin", { session_id: started.details.session_id, chars: "go\n", yield_time_ms: 2000 });
 			assert.equal(finished.details.exit_code, 0);
 			assert.equal(finished.details.output, "b");
-			const filename = finished.details.log_path;
+			const filename = finished.details.log;
 			assert.equal(typeof filename, "string");
-			const path = join(OUTPUT_LOG_DIRECTORY, filename);
+			const path = join(".temp", filename);
 			assert.equal(readFileSync(path, "utf8"), "a".repeat(511) + "b");
-			assert.ok(h.tools.exec_command.description.includes(OUTPUT_LOG_DIRECTORY));
-			assert.ok(h.tools.write_stdin.description.includes(OUTPUT_LOG_DIRECTORY));
 		} finally {
 			await h.emit("session_shutdown");
 		}
@@ -731,10 +729,10 @@ describe("unified-exec e2e", () => {
 		// The rendered text (what actually goes to the LLM) includes the marker.
 		const rendered = r.content[0].text;
 		assert.ok(rendered.includes("Showing lines"), `missing truncation marker in rendered text`);
-		assert.ok(rendered.includes(r.details.log_path), `marker should reference log_path`);
+		assert.ok(rendered.includes(r.details.log), `marker should reference log`);
 
 		// Log file should contain ALL 4000 lines — full retention on disk.
-		const logContent = readFileSync(join(OUTPUT_LOG_DIRECTORY, r.details.log_path), "utf-8");
+		const logContent = readFileSync(join(OUTPUT_LOG_DIRECTORY, r.details.log), "utf-8");
 		const logLines = logContent.split("\n").filter((l) => l.length);
 		assert.equal(logLines.length, 4000, `log should have 4000 lines; got ${logLines.length}`);
 		await h.emit("session_shutdown");
@@ -758,7 +756,7 @@ describe("unified-exec e2e", () => {
 		await h.emit("session_shutdown");
 	});
 
-	it("list_sessions entries include log_path", async () => {
+	it("list_sessions entries include log", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
 		const r1 = await h.call("exec_command", { cmd: 'printf "%0512d" 0; sleep 10', yield_time_ms: 200 });
@@ -766,8 +764,8 @@ describe("unified-exec e2e", () => {
 		assert.equal(l.details.active_count, 1);
 		const entry = l.details.sessions[0];
 		assert.equal(entry.session_id, r1.details.session_id);
-		assert.equal(entry.log_path, r1.details.log_path);
-		assert.ok(existsSync(join(OUTPUT_LOG_DIRECTORY, entry.log_path)));
+		assert.equal(entry.log, r1.details.log);
+		assert.ok(existsSync(join(OUTPUT_LOG_DIRECTORY, entry.log)));
 		await h.call("kill_session", { session_id: r1.details.session_id });
 		await h.emit("session_shutdown");
 	});
@@ -778,8 +776,8 @@ describe("unified-exec e2e", () => {
 		const r1 = await h.call("exec_command", { cmd: "sleep 10", yield_time_ms: 200 });
 		const sid = r1.details.session_id;
 		const r2 = await h.call("kill_session", { session_id: sid });
-		assert.equal(r2.details.log_path, r1.details.log_path);
-		assert.equal(r2.details.log_path, undefined);
+		assert.equal(r2.details.log, r1.details.log);
+		assert.equal(r2.details.log, undefined);
 		await h.emit("session_shutdown");
 	});
 

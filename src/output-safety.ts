@@ -4,7 +4,7 @@
  * A PTY can emit more than color: OSC clipboard writes, alternate-screen and
  * keyboard-mode CSI sequences, DCS payloads, and other controls can reprogram
  * the host terminal when replayed by a custom TUI renderer. Unified-exec keeps
- * the exact byte stream in log_path; model/session/TUI output is plain text.
+ * the exact byte stream in log; model/session/TUI output is plain text.
  */
 
 const ESC = "\x1b";

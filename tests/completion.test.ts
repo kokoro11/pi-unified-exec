@@ -326,7 +326,7 @@ describe("CompletionCoordinator", () => {
 		coordinator.handleEviction(s); // store drops the session
 		await settle();
 		assert.equal(sent.length, 1, "completion must not be silently lost");
-		assert.match(sent[0].content, /log_path: pi-unified-exec-fake\.log/);
+		assert.match(sent[0].content, /log: pi-unified-exec-fake\.log/);
 	});
 
 	it("a failed send is retried at the next flush trigger, still exactly once", async () => {

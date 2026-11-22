@@ -30,7 +30,7 @@ export interface OutputResultDetails {
 	signal?: string;
 	failure_message?: string;
 	tty?: boolean;
-	log_path?: string;
+	log?: string;
 	cwd?: string;
 	command?: string;
 	truncation?: TruncationResult;
@@ -124,7 +124,7 @@ export function safeMeta(value: string, max = 4096): string {
 	return `${clean.slice(0, Math.max(0, max - 1))}…`;
 }
 
-type OutputEnvelope = Pick<OutputResultDetails, "wall_time_seconds" | "output" | "log_path" | "truncation" | "omitted_bytes">;
+type OutputEnvelope = Pick<OutputResultDetails, "wall_time_seconds" | "output" | "log" | "truncation" | "omitted_bytes">;
 
 function createOutputEnvelope(input: OutputEnvelopeInput): OutputEnvelope {
 	const safeText = sanitizeOutputText(decode(input.collected));
@@ -133,7 +133,7 @@ function createOutputEnvelope(input: OutputEnvelopeInput): OutputEnvelope {
 		wall_time_seconds: input.wallTimeSec,
 		output: truncation.content,
 	};
-	if (input.logPath) envelope.log_path = logFileName(input.logPath);
+	if (input.logPath) envelope.log = logFileName(input.logPath);
 	if (input.omittedBytes) envelope.omitted_bytes = input.omittedBytes;
 	if (truncation.truncated) envelope.truncation = truncation;
 	return envelope;
@@ -205,7 +205,7 @@ export function truncationMarker(t: TruncationResult | undefined, logPath: strin
 function appendOutputSection(lines: string[], shape: OutputResultDetails): string {
 	const header = lines.join("\n");
 	const body = shape.output || "(no output)";
-	const marker = truncationMarker(shape.truncation, shape.log_path);
+	const marker = truncationMarker(shape.truncation, shape.log);
 	const footer = marker ? `\n\n${marker}` : "";
 	return `${header}\n---\n${body}${footer}`;
 }
@@ -221,7 +221,7 @@ export function renderProcessResultText(shape: ProcessResultDetails): string {
 	if (shape.on_exit) lines.push(`on_exit: ${safeMeta(shape.on_exit)}`);
 	if (shape.completion_notification) lines.push(`completion_notification: ${safeMeta(shape.completion_notification)}`);
 	if (shape.tool_time_utc) lines.push(`tool_time_utc: ${safeMeta(shape.tool_time_utc)}`);
-	if (shape.log_path && !shape.truncation?.truncated) lines.push(`log_path: ${safeMeta(shape.log_path)}`);
+	if (shape.log && !shape.truncation?.truncated) lines.push(`log: ${safeMeta(shape.log)}`);
 	lines.push(`wall_time: ${formatWallTime(shape.wall_time_seconds)}`);
 	if (shape.omitted_bytes) lines.push(`omitted_bytes: ${shape.omitted_bytes}`);
 	return appendOutputSection(lines, shape);
@@ -236,7 +236,7 @@ export function renderKillResultText(shape: KillResultDetails): string {
 	if (shape.exit_code !== undefined) lines.push(`exit_code: ${shape.exit_code}`);
 	if (shape.signal) lines.push(`signal: ${safeMeta(shape.signal)}`);
 	if (shape.failure_message) lines.push(`failure: ${safeMeta(shape.failure_message)}`);
-	if (shape.log_path && !shape.truncation?.truncated) lines.push(`log_path: ${safeMeta(shape.log_path)}`);
+	if (shape.log && !shape.truncation?.truncated) lines.push(`log: ${safeMeta(shape.log)}`);
 	lines.push(`wall_time: ${formatWallTime(shape.wall_time_seconds)}`);
 	if (shape.omitted_bytes) lines.push(`omitted_bytes: ${shape.omitted_bytes}`);
 	return appendOutputSection(lines, shape);

@@ -33,7 +33,7 @@ import { CompletionCoordinator, type OnExitPolicy, sanitizeMeta } from "./comple
 import { formatElapsed } from "./format-time.ts";
 import { type LongWaitOutcome, startRateLimitedStream, waitForExitOrDeadline } from "./long-wait.ts";
 import { sleep } from "./notify.ts";
-import { logFileName, MIN_LOG_BYTES, OUTPUT_LOG_DIRECTORY } from "./output-log.ts";
+import { logFileName, MIN_LOG_BYTES } from "./output-log.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
 import { getPtyLoadError, isPtyAvailable } from "./pty.ts";
 import {
@@ -102,7 +102,7 @@ const SESSION_UI_KEY = "unified-exec.sessions";
 
 const OUTPUT_LOG_GUIDANCE =
 	`Output below ${MIN_LOG_BYTES} bytes has no log file. At ${MIN_LOG_BYTES} cumulative bytes, the full session output is archived. ` +
-	`log_path is a filename in ${OUTPUT_LOG_DIRECTORY}/; prepend this directory to read it.`;
+	"log is a filename in .temp/ under Pi's cwd; read .temp/<log> for the full output.";
 const PROCESS_CODEMODE_GUIDANCE =
 	"In codemode, use r.details for structured data such as exit_code and session_id. To display the result, call text(r.text) directly. " +
 	OUTPUT_LOG_GUIDANCE;
@@ -875,7 +875,7 @@ function buildStreamUpdate(
 			tty: session.tty,
 			command: session.displayCommand,
 			cwd: session.cwd,
-			log_path: logFileName(session.logPath),
+			log: logFileName(session.logPath),
 			// Populate `output` so renderResult has a single source regardless
 			// of streaming vs final state.
 			output: tailText,
@@ -1186,7 +1186,7 @@ export default function (pi: ExtensionAPI) {
 			"NEVER use yield_until for REPLs, sudo, ssh, password prompts, dev servers, file watchers, debuggers, or any indefinite/interactive session — it is only for finite commands that will exit on their own.",
 			'on_exit wake is set via exec_command or set_on_exit, not write_stdin. Observing an exit here consumes an armed wake (direct result). To disarm wake without killing, call set_on_exit(session_id, on_exit: "none").',
 			"In tty sessions, submit lines with \\r (the Enter key) rather than \\n: POSIX terminals accept both, but Windows console programs only execute input on \\r.",
-			"For very noisy jobs, rely on the log_path and final/truncated output instead of repeatedly polling.",
+			"For very noisy jobs, rely on the log and final/truncated output instead of repeatedly polling.",
 		],
 		outputSchema: processScriptResultSchema,
 		parameters: Type.Object({
@@ -1294,7 +1294,7 @@ export default function (pi: ExtensionAPI) {
 					running,
 					wake_armed: armed,
 					command: session?.displayCommand,
-					log_path: logFileName(session?.logPath),
+					log: logFileName(session?.logPath),
 					tool_time_utc: nowUtcIso(),
 				},
 			};
@@ -1417,7 +1417,7 @@ export default function (pi: ExtensionAPI) {
 					exit_code: s.hasExited ? s.exitCode : undefined,
 					signal: s.hasExited ? (s.signal ?? undefined) : undefined,
 					failure_message: s.failureMessage ?? undefined,
-					log_path: logFileName(s.logPath),
+					log: logFileName(s.logPath),
 				}));
 			const toolTimeUtc = nowUtcIso();
 			const lines = sessions.length
@@ -1428,7 +1428,7 @@ export default function (pi: ExtensionAPI) {
 						const wake = s.wake_armed ? " [wake]" : "";
 						return `  ${String(s.session_id).padStart(3)}  pid=${String(s.pid ?? "?").padStart(6)}  ${
 							s.tty ? "tty" : "pipe"
-						}  ${((s.elapsed_ms / 1000).toFixed(1) + "s").padStart(8)}${wake}  ${oneLineCommand(s.command, 60)}${exitedSuffix}${s.log_path ? `\n        log: ${s.log_path}` : ""}`;
+						}  ${((s.elapsed_ms / 1000).toFixed(1) + "s").padStart(8)}${wake}  ${oneLineCommand(s.command, 60)}${exitedSuffix}${s.log ? `\n        log: ${s.log}` : ""}`;
 					})
 				: ["  (no live sessions)"];
 			const header = reaped.length

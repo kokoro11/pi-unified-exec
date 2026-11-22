@@ -76,7 +76,7 @@ interface SessionListItem {
 	exit_code?: number | null;
 	signal?: string;
 	failure_message?: string;
-	log_path?: string;
+	log?: string;
 }
 
 interface ListSessionsDetails {
@@ -346,7 +346,7 @@ function rebuildOutputResult(
 
 	const t = details.truncation;
 	if (t?.truncated) {
-		const logInfo = details.log_path ? `. Full output: ${safeOneLine(details.log_path)}` : "";
+		const logInfo = details.log ? `. Full output: ${safeOneLine(details.log)}` : "";
 		let message: string;
 		if (t.lastLinePartial) {
 			message = `Truncated: last ${formatSize(t.outputBytes)} of line ${t.totalLines} shown (${formatSize(DEFAULT_MAX_BYTES)} limit)${logInfo}`;
@@ -409,7 +409,7 @@ function buildStatusLine(
 	if (details.wait_status === "cancelled") bits.push(theme.fg("warning", "cancelled"));
 	if (details.wait_status === "interrupted_by_steer") bits.push(theme.fg("accent", "steered"));
 	if (details.completion_notification === "armed") bits.push("wake armed");
-	if (details.log_path) bits.push(`log: ${safeOneLine(tildify(details.log_path))}`);
+	if (details.log) bits.push(`log: ${safeOneLine(tildify(details.log))}`);
 
 	return theme.fg("muted", bits.join(" · "));
 }
@@ -476,9 +476,9 @@ export function renderListSessionsResult(
 					const command = safeOneLine(session.command, 100);
 					const line = `#${session.session_id} pid=${session.pid ?? "?"} ${session.tty ? "tty" : "pipe"} ${(session.elapsed_ms / 1000).toFixed(1)}s ${state}${wake} ${command}`;
 					lines.push(truncateToWidth(line, width, "..."));
-					if (options.expanded && session.log_path) {
+					if (options.expanded && session.log) {
 						lines.push(
-							truncateToWidth(theme.fg("muted", `  log: ${safeOneLine(tildify(session.log_path))}`), width, "..."),
+							truncateToWidth(theme.fg("muted", `  log: ${safeOneLine(tildify(session.log))}`), width, "..."),
 						);
 					}
 				}

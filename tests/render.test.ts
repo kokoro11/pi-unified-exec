@@ -200,7 +200,7 @@ describe("unified-exec renderers", () => {
 			elapsed_ms: 1000 * (index + 1),
 			running: true,
 			wake_armed: index === 0,
-			log_path: `/tmp/session-${index + 1}.log`,
+			log: `/tmp/session-${index + 1}.log`,
 		}));
 		let firstCommandReads = 0;
 		Object.defineProperty(sessions[0], "command", {

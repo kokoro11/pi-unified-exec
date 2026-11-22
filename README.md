@@ -53,7 +53,7 @@ pi-flavor additions (`set_on_exit`, `kill_session`, `list_sessions`).
   TUI renderers; child output defaults to a five-visual-line tail and expands
   with Pi's configured `app.tools.expand` binding. Model/result/TUI text strips
   terminal-control sequences; the complete raw stream remains available at
-  `log_path`.
+`log`.
 - **Default-on compact codemode previews.** A display-only wrapper bounds
   collapsed codemode results to ten visual rows, including object/settled
   output from any nested tool. Native execution and expansion are unchanged,
@@ -128,7 +128,7 @@ Response body (short output, no truncation):
 session_id: 1                       (mutually exclusive with exit_code)
 exit_code: 0                        (mutually exclusive with session_id)
 signal: SIGTERM                     (optional, if killed)
-log_path: pi-unified-exec-1-5cc5e104.log  (only once cumulative output reaches 512 bytes)
+log: pi-unified-exec-1-5cc5e104.log  (only once cumulative output reaches 512 bytes)
 wall_time: 502ms
 omitted_bytes: 3145728              (only present when in-memory retention drops middle bytes)
 ---
@@ -136,13 +136,14 @@ omitted_bytes: 3145728              (only present when in-memory retention drops
 ```
 
 `wall_time` uses rounded integer milliseconds below one second, four significant
-digits from one to under 1000 seconds (`1.234s`, `567.8s`), and rounded whole
+digits from one to under 1000 seconds (`1.234s`, `567.8s`), omitting trailing
+decimal zeroes (`1s`, `1.2s`), and rounded whole
 seconds from 1000 seconds onward (`12345s`). Structured `details.wall_time_seconds`
 remains numeric for scripts.
 
 If a chatty process produces more than the 1 MiB in-memory retention between
 polls, the middle is dropped and a marker is spliced at the exact omission
-point (the full stream is always in `log_path`):
+point (the full stream is always in `log`):
 
 ```
 [... 3145728 bytes omitted here (output exceeded the 1048576-byte in-memory retention between polls; the full stream is in the session log file) ...]
@@ -335,7 +336,7 @@ Mechanics:
   eviction of a live process, and `session_shutdown` all suppress the wake
   (before signaling). A kill that fails to land restores eligibility. A
   naturally-exited wake session that gets evicted before notification keeps
-  a bounded tombstone snapshot so its one wake (with `log_path`) is still
+a bounded tombstone snapshot so its one wake (with `log`) is still
   delivered — unless `set_on_exit … none` disarms that tombstone by id.
   `list_sessions` reporting the exit first counts as direct observation and
   suppresses a not-yet-queued wake.
@@ -359,7 +360,7 @@ names are rejected with an error instead of silently no-opping.
 The result uses the same bounded output envelope as `exec_command` and
 `write_stdin`: `details.output` contains at most 50 KiB / 2000 lines of
 terminal-inert plain text, `truncation` and `omitted_bytes` explain any loss,
-and `log_path`, when present, names the complete raw session stream. Explicit `operation`,
+and `log`, when present, names the complete raw session stream. Explicit `operation`,
 `status`, `running`, `killed`,
 `escalated`, requested/actual signal, and process metadata distinguish session
 identity from liveness. A failed kill remains registered and reports
@@ -369,7 +370,7 @@ identity from liveness. A failed kill remains registered and reports
 
 Pi-flavor. Not in codex. Prunes exited sessions from the in-memory store, but
 reports each of them one final time (with `running: false`, `exit_code` /
-`signal`, and `log_path`) so exit information is never silently lost.
+`signal`, and `log`) so exit information is never silently lost.
 
 Each entry includes **`wake_armed: boolean`** (and the text listing marks
 live armed sessions with `[wake]`) so the model can audit which sessions will
@@ -409,7 +410,7 @@ text(r.text);
 ```
 
 Use `r.details` when the script needs structured fields such as `running`,
-`session_id`, `exit_code`, or `log_path`. `r.details.output` is the bounded,
+`session_id`, `exit_code`, or `log`. `r.details.output` is the bounded,
 terminal-safe tail of the child process output.
 
 ```js
@@ -535,7 +536,7 @@ preserving the usual lazy cleanup semantics.
 Use the configured
 `app.tools.expand` binding (Ctrl+O by default) to reveal the complete **bounded
 result**. Expansion never reads an arbitrary-size log synchronously; use
-`log_path` when the complete raw session stream is required. Raw PTY logs can
+`.temp/<log>` when the complete raw session stream is required. Raw PTY logs can
 contain terminal mode/clipboard sequences, so inspect them through `read`, a
 hex/escape visualizer, or another non-executing viewer rather than `cat`.
 
@@ -816,9 +817,9 @@ the session's lifetime. Smaller output stays inline without creating a file.
 Codex serializes up to ~40 KiB to the LLM on every call (10 000 tokens of
 middle-truncated text). That's a bounded-but-generous context cost per call,
 and codex gives the LLM no way to recover the dropped middle. Our port
-tail-truncates per pi's `bash` tool and exposes `log_path` in the response
+tail-truncates per pi's `bash` tool and exposes `log` in the response
 header or truncation footer and tool-call details. To read the full output,
-join the filename to the shared directory stated in the tool description.
+read `.temp/<log>` under Pi's cwd, as stated in the tool description.
 
 As a consequence we dropped codex's `max_output_tokens` parameter on both
 `exec_command` and `write_stdin`. The per-call cap is fixed; if the LLM
@@ -834,10 +835,10 @@ log file.
 | Per-call `max_output_tokens` knob | yes (default 10 000) | removed; fixed 50 KiB/2000 lines |
 | Truncation marker in body | `…N tokens truncated…` | `[Showing lines X-Y of T. Full output: …]` |
 
-The optional `log_path` field is a filename, exposed after the session reaches
+The optional `log` field is a filename, exposed after the session reaches
 512 raw output bytes in `exec_command`, `write_stdin`, `kill_session`, and
 `list_sessions` entries. Truncated replies include it once in their recovery
-footer. Tool descriptions state the absolute shared directory.
+footer. Tool descriptions use the fixed directory `.temp/` under Pi's cwd.
 
 Log files stay in `.temp/` under Pi's starting directory until manually cleaned
 up. This directory is shared by all sessions, including commands using a

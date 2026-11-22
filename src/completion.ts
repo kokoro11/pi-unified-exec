@@ -478,15 +478,15 @@ export function buildWakeMessage(snapshots: CompletionSnapshot[]): WakeMessage {
 				`cwd: ${oneLine(s.cwd, 120)}${failure}`,
 		);
 		lines.push(`  command: ${oneLine(s.command, MAX_COMMAND_CHARS)}`);
-		if (s.logPath) lines.push(`  log_path: ${oneLine(logFileName(s.logPath)!, 200)}`);
+		if (s.logPath) lines.push(`  log: ${oneLine(logFileName(s.logPath)!, 200)}`);
 	}
 	if (snapshots.length > shown.length) {
 		lines.push(`… and ${snapshots.length - shown.length} more (use list_sessions).`);
 	}
 	lines.push(
 		"Final output has NOT necessarily been consumed: call write_stdin with no chars for each exited " +
-			"session_id to drain its final output, or read the log_path (if a session_id is no longer known, " +
-			"use the log_path). Then continue the original task — do not merely acknowledge this notification.",
+		"session_id to drain its final output, or read .temp/<log> (if a session_id is no longer known, " +
+		"use .temp/<log>). Then continue the original task — do not merely acknowledge this notification.",
 	);
 	return {
 		content: lines.join("\n"),

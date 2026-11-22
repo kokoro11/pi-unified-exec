@@ -63,7 +63,7 @@ The initiative establishes a durable output contract across these layers:
 - Use `keyHint("app.tools.expand", ...)`, not a hard-coded Ctrl+O label.
 - Keep truncation and log-recovery warnings visible while collapsed.
 - Do not synchronously load an arbitrary log file when expanded. Expanded mode
-  shows the complete bounded result; `log_path` owns complete-stream recovery.
+  shows the complete bounded result; `log` owns complete-stream recovery.
 - Preserve native codemode definition fields/schema by reference, inactive
   default, settings/loadout, MCP auto-activation, model helpers and store/load.
 - Unwrap cached native components before calling the original renderer; Pi
@@ -161,7 +161,7 @@ On Pi 0.99.1 at 100×60, native object/settled result text components took 20/21
 the wrapper takes at most ten including summaries/spacers/footer. Multiline
 output keeps the original 36-more-lines hint when it fits. Actual CLI gates
 compare content after normalizing the elapsed-time header and compare native
-declarations after normalizing each run's shared log directory. They also cover
+declarations directly across working directories. They also cover
 mode/budget, default/legacy-exclusion/opt-out/MCP activation, search/model helpers
 and all store entries. TUI gates exercise Ctrl+O expansion and recollapse at
 40/80/100 columns, regular/fullscreen and dark/system/light themes, with no
@@ -225,8 +225,8 @@ app.tools.expand again: five-line tail restored
 ### Output archive safety
 
 Session logs start at 512 raw output bytes and retain the complete stream in
-the starting directory's `.temp/` folder. Replies use filenames; tool descriptions
-state the shared absolute directory. Logs remain unbounded and require manual
+the starting directory's `.temp/` folder. Replies use the filename field `log`;
+tool descriptions state `.temp/` under Pi's cwd. Logs remain unbounded and require manual
 cleanup. A separate initiative should decide and test:
 
 - a configurable per-session archive cap with explicit unlimited opt-in;

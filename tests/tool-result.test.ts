@@ -35,7 +35,7 @@ describe("bounded tool results", () => {
 		assert.equal(details.output, "hello\nworld\n");
 		assert.equal(
 			renderProcessResultText(details),
-			"[still running]\nsession_id: 7\nlog_path: session.log\nwall_time: 250ms\n---\nhello\nworld\n",
+			"[still running]\nsession_id: 7\nlog: session.log\nwall_time: 250ms\n---\nhello\nworld\n",
 		);
 	});
 

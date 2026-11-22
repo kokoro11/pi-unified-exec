@@ -38,13 +38,6 @@ function run({ fixed = true, pattern = "parity", mode = "on", budget = 3000, act
 		assert.equal(child.status, 0, child.stderr);
 		const events = child.stdout.trim().split("\n").map(line => JSON.parse(line));
 		const requests = readFileSync(capture, "utf8").trim().split("\n").map(line => JSON.parse(line));
-		// Each run has its own cwd; compare declarations with the shared log directory normalized.
-		const logDirectory = join(root, ".temp").replaceAll("\\", "/");
-		for (const request of requests) {
-			for (const tool of request.tools) {
-				tool.description = tool.description.replaceAll(logDirectory, "<log-directory>");
-			}
-		}
 		const ends = events.filter(e => e.type === "tool_execution_end" && e.toolName === "codemode");
 		for (const end of ends) assert.equal(end.isError, false, JSON.stringify(end.result));
 		assert.match(child.stdout, /EXEC_CODEMODE_OK/);

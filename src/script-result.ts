@@ -22,13 +22,13 @@ const outputFields = {
 	output: Type.String({
 		description: "Bounded, terminal-safe tail of the child output with real newlines.",
 	}),
-	truncated: Type.Boolean({ description: "True when earlier output was dropped; the full stream is in log_path." }),
+	truncated: Type.Boolean({ description: "True when earlier output was dropped; the full stream is in log." }),
 	omitted_bytes: Type.Optional(Type.Number({ description: "Middle bytes dropped by the in-memory retention cap." })),
 	exit_code: Type.Optional(Type.Number({ description: "Exit code once the process has exited." })),
 	signal: Type.Optional(Type.String({ description: "Signal that terminated the process, if any." })),
 	failure_message: Type.Optional(Type.String()),
-	log_path: Type.Optional(
-		Type.String({ description: "Log filename in the directory given in the tool description; present at 512 cumulative output bytes." }),
+	log: Type.Optional(
+		Type.String({ description: "Log filename in .temp/ under Pi's cwd; present at 512 cumulative output bytes." }),
 	),
 	wall_time_seconds: Type.Number(),
 };
@@ -64,7 +64,7 @@ export function processScriptResult(shape: ProcessResultDetails): ProcessScriptR
 			exit_code: shape.exit_code,
 			signal: optionalMeta(shape.signal),
 			failure_message: optionalMeta(shape.failure_message),
-			log_path: optionalMeta(shape.log_path),
+			log: optionalMeta(shape.log),
 			wall_time_seconds: shape.wall_time_seconds,
 			note: optionalMeta(shape.note),
 			wait_status: shape.wait_status,
@@ -100,7 +100,7 @@ export function killScriptResult(shape: KillResultDetails): KillScriptResult {
 		exit_code: shape.exit_code,
 		signal: optionalMeta(shape.signal),
 		failure_message: optionalMeta(shape.failure_message),
-		log_path: optionalMeta(shape.log_path),
+		log: optionalMeta(shape.log),
 		wall_time_seconds: shape.wall_time_seconds,
 	});
 }
@@ -153,7 +153,7 @@ export const listSessionsScriptResultSchema = Type.Object({
 			wake_armed: Type.Boolean(),
 			exit_code: Type.Optional(Type.Number()),
 			signal: Type.Optional(Type.String()),
-			log_path: Type.Optional(Type.String()),
+			log: Type.Optional(Type.String()),
 		}),
 	),
 	active_count: Type.Number(),
@@ -174,7 +174,7 @@ export function listSessionsScriptResult(value: {
 		wake_armed: boolean;
 		exit_code?: number | null;
 		signal?: string;
-		log_path?: string;
+		log?: string;
 	}>;
 	active_count: number;
 	just_exited_count: number;
@@ -193,7 +193,7 @@ export function listSessionsScriptResult(value: {
 				wake_armed: s.wake_armed,
 				exit_code: s.exit_code ?? undefined,
 				signal: optionalMeta(s.signal),
-				log_path: optionalMeta(s.log_path),
+				log: optionalMeta(s.log),
 			}),
 		),
 		active_count: value.active_count,
