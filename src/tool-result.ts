@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -8,6 +7,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import type { OnExitPolicy } from "./completion.ts";
+import { formatWallTime } from "./format-time.ts";
+import { logFileName } from "./output-log.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
 
 const textDecoder = new TextDecoder("utf-8", { fatal: false });
@@ -21,11 +22,9 @@ export interface OutputResultDetails {
 	operation: ProcessOperation | "kill_session";
 	status: ProcessStatus | KillStatus;
 	running: boolean;
-	chunk_id: string;
 	wall_time_seconds: number;
 	/** Bounded, terminal-inert tail sent to the model and used by the TUI renderer. */
 	output: string;
-	original_token_count?: number;
 	session_id?: number;
 	exit_code?: number;
 	signal?: string;
@@ -37,8 +36,6 @@ export interface OutputResultDetails {
 	truncation?: TruncationResult;
 	/** Middle bytes dropped by the in-memory retention cap before result truncation. */
 	omitted_bytes?: number;
-	/** Cumulative bytes this session has produced since spawn. */
-	output_bytes_total?: number;
 	/** Optional explanation of an unusual session state (e.g. shell exited but pipe held open). */
 	note?: string;
 }
@@ -80,8 +77,6 @@ interface OutputEnvelopeInput {
 	logPath?: string;
 	/** Middle bytes dropped by the retention cap during this call's drain. */
 	omittedBytes?: number;
-	/** Cumulative bytes the session has produced since spawn. */
-	totalBytes?: number;
 }
 
 export interface FinalizeProcessInput extends OutputEnvelopeInput {
@@ -112,15 +107,6 @@ export interface FinalizeKillInput extends OutputEnvelopeInput {
 	killed: boolean;
 }
 
-function generateChunkId(): string {
-	return randomBytes(3).toString("hex");
-}
-
-function approxTokenCount(bytes: Uint8Array): number {
-	// Mirror codex's rough `approx_token_count` behaviour: 4 bytes ≈ 1 token.
-	return Math.ceil(bytes.length / 4);
-}
-
 function decode(bytes: Uint8Array): string {
 	return textDecoder.decode(bytes);
 }
@@ -138,30 +124,17 @@ export function safeMeta(value: string, max = 4096): string {
 	return `${clean.slice(0, Math.max(0, max - 1))}…`;
 }
 
-type OutputEnvelope = Pick<
-	OutputResultDetails,
-	| "chunk_id"
-	| "wall_time_seconds"
-	| "output"
-	| "original_token_count"
-	| "log_path"
-	| "truncation"
-	| "omitted_bytes"
-	| "output_bytes_total"
->;
+type OutputEnvelope = Pick<OutputResultDetails, "wall_time_seconds" | "output" | "log_path" | "truncation" | "omitted_bytes">;
 
 function createOutputEnvelope(input: OutputEnvelopeInput): OutputEnvelope {
 	const safeText = sanitizeOutputText(decode(input.collected));
 	const truncation = truncateTail(safeText, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
 	const envelope: OutputEnvelope = {
-		chunk_id: generateChunkId(),
 		wall_time_seconds: input.wallTimeSec,
 		output: truncation.content,
-		original_token_count: approxTokenCount(input.collected),
 	};
-	if (input.logPath) envelope.log_path = input.logPath;
+	if (input.logPath) envelope.log_path = logFileName(input.logPath);
 	if (input.omittedBytes) envelope.omitted_bytes = input.omittedBytes;
-	if (input.totalBytes !== undefined) envelope.output_bytes_total = input.totalBytes;
 	if (truncation.truncated) envelope.truncation = truncation;
 	return envelope;
 }
@@ -217,7 +190,7 @@ export function finalizeKillResult(input: FinalizeKillInput): KillResultDetails 
 /** Pi-bash-style marker appended to model-visible text after a truncated body. */
 export function truncationMarker(t: TruncationResult | undefined, logPath: string | undefined): string | null {
 	if (!t?.truncated) return null;
-	const full = logPath ? `. Full output: ${safeMeta(logPath)}` : "";
+	const full = logPath ? `. Full output: ${safeMeta(logFileName(logPath)!)}` : "";
 	if (t.lastLinePartial) {
 		return `[Showing last ${formatSize(t.outputBytes)} of final line (line ${t.totalLines} is larger than the ${formatSize(DEFAULT_MAX_BYTES)} limit)${full}]`;
 	}
@@ -244,23 +217,13 @@ export function renderProcessResultText(shape: ProcessResultDetails): string {
 	if (shape.signal) lines.push(`signal: ${safeMeta(shape.signal)}`);
 	if (shape.failure_message) lines.push(`failure: ${safeMeta(shape.failure_message)}`);
 	if (shape.note) lines.push(`note: ${safeMeta(shape.note)}`);
-	if (shape.wait_mode) lines.push(`wait_mode: ${safeMeta(shape.wait_mode)}`);
 	if (shape.wait_status) lines.push(`wait_status: ${safeMeta(shape.wait_status)}`);
-	if (shape.yield_until) lines.push(`yield_until: ${safeMeta(shape.yield_until)}`);
-	if (shape.effective_wait_ms !== undefined) lines.push(`effective_wait_ms: ${shape.effective_wait_ms}`);
 	if (shape.on_exit) lines.push(`on_exit: ${safeMeta(shape.on_exit)}`);
 	if (shape.completion_notification) lines.push(`completion_notification: ${safeMeta(shape.completion_notification)}`);
-	if (shape.completion_delivery) lines.push(`completion_delivery: ${safeMeta(shape.completion_delivery)}`);
-	if (shape.on_exit_wake) lines.push(`on_exit_wake: ${safeMeta(shape.on_exit_wake)}`);
 	if (shape.tool_time_utc) lines.push(`tool_time_utc: ${safeMeta(shape.tool_time_utc)}`);
-	if (shape.log_path) lines.push(`log_path: ${safeMeta(shape.log_path)}`);
-	if (shape.cwd) lines.push(`cwd: ${safeMeta(shape.cwd)}`);
-	lines.push(`wall_time_seconds: ${shape.wall_time_seconds.toFixed(3)}`);
-	lines.push(`chunk_id: ${shape.chunk_id}`);
-	if (shape.original_token_count !== undefined) lines.push(`original_token_count: ${shape.original_token_count}`);
-	if (shape.output_bytes_total !== undefined) lines.push(`output_bytes_total: ${shape.output_bytes_total}`);
+	if (shape.log_path && !shape.truncation?.truncated) lines.push(`log_path: ${safeMeta(shape.log_path)}`);
+	lines.push(`wall_time: ${formatWallTime(shape.wall_time_seconds)}`);
 	if (shape.omitted_bytes) lines.push(`omitted_bytes: ${shape.omitted_bytes}`);
-	if (shape.tty !== undefined) lines.push(`tty: ${shape.tty}`);
 	return appendOutputSection(lines, shape);
 }
 
@@ -268,20 +231,13 @@ export function renderKillResultText(shape: KillResultDetails): string {
 	const lines: string[] = [shape.killed ? "[killed]" : "[kill failed]"];
 	lines.push(`session_id: ${shape.session_id}`);
 	if (shape.pid !== undefined) lines.push(`pid: ${shape.pid}`);
-	lines.push(`requested_signal: ${safeMeta(shape.requested_signal)}`);
-	lines.push(`killed: ${shape.killed}`);
 	lines.push(`running: ${shape.running}`);
 	lines.push(`escalated: ${shape.escalated}`);
 	if (shape.exit_code !== undefined) lines.push(`exit_code: ${shape.exit_code}`);
 	if (shape.signal) lines.push(`signal: ${safeMeta(shape.signal)}`);
 	if (shape.failure_message) lines.push(`failure: ${safeMeta(shape.failure_message)}`);
-	if (shape.log_path) lines.push(`log_path: ${safeMeta(shape.log_path)}`);
-	if (shape.cwd) lines.push(`cwd: ${safeMeta(shape.cwd)}`);
-	lines.push(`wall_time_seconds: ${shape.wall_time_seconds.toFixed(3)}`);
-	lines.push(`chunk_id: ${shape.chunk_id}`);
-	if (shape.original_token_count !== undefined) lines.push(`original_token_count: ${shape.original_token_count}`);
-	if (shape.output_bytes_total !== undefined) lines.push(`output_bytes_total: ${shape.output_bytes_total}`);
+	if (shape.log_path && !shape.truncation?.truncated) lines.push(`log_path: ${safeMeta(shape.log_path)}`);
+	lines.push(`wall_time: ${formatWallTime(shape.wall_time_seconds)}`);
 	if (shape.omitted_bytes) lines.push(`omitted_bytes: ${shape.omitted_bytes}`);
-	if (shape.tty !== undefined) lines.push(`tty: ${shape.tty}`);
 	return appendOutputSection(lines, shape);
 }

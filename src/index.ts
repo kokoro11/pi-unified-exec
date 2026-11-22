@@ -18,9 +18,9 @@
  *   - Aborting the tool call (Esc) breaks the wait but does not kill the
  *     session; the next turn can still drive it.
  *   - Sessions are terminated on session_shutdown (codex parity).
- *   - Every byte the child writes goes to a per-session log file at
- *     /tmp/pi-unified-exec-<sid>-<random>.log. The LLM sees the last ~50 KiB
- *     / 2000 lines per call and the full file is available via `read`.
+ *   - Once a session produces 512 bytes, its complete output is archived in
+ *     the starting directory's .temp/ folder. The LLM sees the last ~50 KiB
+ *     / 2000 lines per call and a filename for full-output recovery.
  */
 
 import { constants as osConstants } from "node:os";
@@ -33,6 +33,7 @@ import { CompletionCoordinator, type OnExitPolicy, sanitizeMeta } from "./comple
 import { formatElapsed } from "./format-time.ts";
 import { type LongWaitOutcome, startRateLimitedStream, waitForExitOrDeadline } from "./long-wait.ts";
 import { sleep } from "./notify.ts";
+import { logFileName, MIN_LOG_BYTES, OUTPUT_LOG_DIRECTORY } from "./output-log.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
 import { getPtyLoadError, isPtyAvailable } from "./pty.ts";
 import {
@@ -99,8 +100,12 @@ const MAX_PTY_ROWS = 300;
 const LONG_WAIT_UPDATE_INTERVAL_MS = 30_000;
 const SESSION_UI_KEY = "unified-exec.sessions";
 
+const OUTPUT_LOG_GUIDANCE =
+	`Output below ${MIN_LOG_BYTES} bytes has no log file. At ${MIN_LOG_BYTES} cumulative bytes, the full session output is archived. ` +
+	`log_path is a filename in ${OUTPUT_LOG_DIRECTORY}/; prepend this directory to read it.`;
 const PROCESS_CODEMODE_GUIDANCE =
-	"In codemode, use r.details for structured data such as exit_code and session_id. To display the result, call text(r.text) directly.";
+	"In codemode, use r.details for structured data such as exit_code and session_id. To display the result, call text(r.text) directly. " +
+	OUTPUT_LOG_GUIDANCE;
 
 /**
  * Google-compatible string enum schema (plain `type: "string"` + `enum`,
@@ -353,7 +358,6 @@ async function runExecCommand(
 				wallTimeSec: wallSec,
 				collected: collected.bytes,
 				omittedBytes: collected.omittedBytes,
-				totalBytes: session.totalBytesSeen,
 				sessionId: undefined,
 				exitCode: session.exitCode,
 				signal: session.signal,
@@ -413,7 +417,6 @@ async function runExecCommand(
 				wallTimeSec: wallSec,
 				collected: collected.bytes,
 				omittedBytes: collected.omittedBytes,
-				totalBytes: session.totalBytesSeen,
 				sessionId: session.id,
 				exitCode: undefined,
 				signal: null,
@@ -439,7 +442,6 @@ async function runExecCommand(
 			wallTimeSec: wallSec,
 			collected: collected.bytes,
 			omittedBytes: collected.omittedBytes,
-			totalBytes: session.totalBytesSeen,
 			sessionId: undefined,
 			exitCode: session.exitCode,
 			signal: session.signal,
@@ -527,7 +529,6 @@ async function runWriteStdin(
 					wallTimeSec: wallSec,
 					collected: collected.bytes,
 					omittedBytes: collected.omittedBytes,
-					totalBytes: session.totalBytesSeen,
 					sessionId: undefined,
 					exitCode: session.exitCode,
 					signal: session.signal,
@@ -564,7 +565,6 @@ async function runWriteStdin(
 				wallTimeSec: wallSec,
 				collected: collected.bytes,
 				omittedBytes: collected.omittedBytes,
-				totalBytes: session.totalBytesSeen,
 				sessionId: undefined,
 				exitCode: session.exitCode,
 				signal: session.signal,
@@ -585,7 +585,6 @@ async function runWriteStdin(
 			wallTimeSec: wallSec,
 			collected: collected.bytes,
 			omittedBytes: collected.omittedBytes,
-			totalBytes: session.totalBytesSeen,
 			sessionId: session.id,
 			exitCode: undefined,
 			signal: null,
@@ -692,7 +691,6 @@ async function runAttachedWait(
 			wallTimeSec: elapsedMs / 1000,
 			collected: collected.bytes,
 			omittedBytes: collected.omittedBytes,
-			totalBytes: session.totalBytesSeen,
 			sessionId: outcome === "exit" ? undefined : session.id,
 			exitCode: outcome === "exit" ? session.exitCode : undefined,
 			signal: outcome === "exit" ? session.signal : null,
@@ -877,7 +875,7 @@ function buildStreamUpdate(
 			tty: session.tty,
 			command: session.displayCommand,
 			cwd: session.cwd,
-			log_path: session.logPath,
+			log_path: logFileName(session.logPath),
 			// Populate `output` so renderResult has a single source regardless
 			// of streaming vs final state.
 			output: tailText,
@@ -1296,7 +1294,7 @@ export default function (pi: ExtensionAPI) {
 					running,
 					wake_armed: armed,
 					command: session?.displayCommand,
-					log_path: session?.logPath,
+					log_path: logFileName(session?.logPath),
 					tool_time_utc: nowUtcIso(),
 				},
 			};
@@ -1309,7 +1307,8 @@ export default function (pi: ExtensionAPI) {
 		name: "kill_session",
 		label: "kill_session",
 		description:
-			"Terminate a session (SIGTERM, escalates to SIGKILL after 2s; on Windows any signal force-kills the process tree). Use when the process won't exit via Ctrl-C. session_id is invalid after. Also suppresses any armed on_exit wake.",
+			"Terminate a session (SIGTERM, escalates to SIGKILL after 2s; on Windows any signal force-kills the process tree). Use when the process won't exit via Ctrl-C. session_id is invalid after. Also suppresses any armed on_exit wake. " +
+			OUTPUT_LOG_GUIDANCE,
 		promptSnippet: "Terminate a session",
 		outputSchema: killScriptResultSchema,
 		parameters: Type.Object({
@@ -1352,7 +1351,6 @@ export default function (pi: ExtensionAPI) {
 				wallTimeSec: (Date.now() - startedAt) / 1000,
 				collected: collected.bytes,
 				omittedBytes: collected.omittedBytes,
-				totalBytes: session.totalBytesSeen,
 				sessionId: sid,
 				pid: session.pid,
 				requestedSignal: initial,
@@ -1379,7 +1377,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "list_sessions",
 		label: "list_sessions",
-		description: "List all live unified-exec sessions in this pi run.",
+		description: "List all live unified-exec sessions in this pi run. " + OUTPUT_LOG_GUIDANCE,
 		promptSnippet: "List live sessions",
 		outputSchema: listSessionsScriptResultSchema,
 		parameters: Type.Object({}),
@@ -1419,8 +1417,7 @@ export default function (pi: ExtensionAPI) {
 					exit_code: s.hasExited ? s.exitCode : undefined,
 					signal: s.hasExited ? (s.signal ?? undefined) : undefined,
 					failure_message: s.failureMessage ?? undefined,
-					output_bytes_total: s.totalBytesSeen,
-					log_path: s.logPath,
+					log_path: logFileName(s.logPath),
 				}));
 			const toolTimeUtc = nowUtcIso();
 			const lines = sessions.length
@@ -1431,7 +1428,7 @@ export default function (pi: ExtensionAPI) {
 						const wake = s.wake_armed ? " [wake]" : "";
 						return `  ${String(s.session_id).padStart(3)}  pid=${String(s.pid ?? "?").padStart(6)}  ${
 							s.tty ? "tty" : "pipe"
-						}  ${((s.elapsed_ms / 1000).toFixed(1) + "s").padStart(8)}${wake}  ${oneLineCommand(s.command, 60)}${exitedSuffix}\n        log: ${s.log_path}`;
+						}  ${((s.elapsed_ms / 1000).toFixed(1) + "s").padStart(8)}${wake}  ${oneLineCommand(s.command, 60)}${exitedSuffix}${s.log_path ? `\n        log: ${s.log_path}` : ""}`;
 					})
 				: ["  (no live sessions)"];
 			const header = reaped.length

@@ -55,7 +55,6 @@ describe("unified-exec renderers", () => {
 		const details = finalizeKillResult({
 			wallTimeSec: 0.1,
 			collected: encoder.encode(output),
-			totalBytes: Buffer.byteLength(output),
 			sessionId: 73,
 			pid: 777,
 			requestedSignal: "SIGTERM",
@@ -119,7 +118,6 @@ describe("unified-exec renderers", () => {
 			requested_signal: "SIGTERM",
 			killed: true,
 			escalated: false,
-			chunk_id: "abc123",
 			wall_time_seconds: 0.1,
 			output: `before${osc}after`,
 		};
@@ -202,7 +200,6 @@ describe("unified-exec renderers", () => {
 			elapsed_ms: 1000 * (index + 1),
 			running: true,
 			wake_armed: index === 0,
-			output_bytes_total: index,
 			log_path: `/tmp/session-${index + 1}.log`,
 		}));
 		let firstCommandReads = 0;

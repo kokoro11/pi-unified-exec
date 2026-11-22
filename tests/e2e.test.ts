@@ -9,9 +9,11 @@
 
 import { strict as assert } from "node:assert";
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
 import extensionFactory, { MAX_EMPTY_POLL_ENV_VAR, resolveMaxEmptyPollMs } from "../src/index.ts";
+import { OUTPUT_LOG_DIRECTORY } from "../src/output-log.ts";
 import { IS_WINDOWS } from "../src/shell.ts";
 
 // Process-tool harness: the fake API has no codemode surfaces (see codemode-render tests).
@@ -373,7 +375,7 @@ describe("unified-exec e2e", () => {
 			// Yield before the burst so kill_session, rather than exec_command,
 			// owns the buffered output that exercises this regression.
 			const started = await h.call("exec_command", {
-				cmd: 'sleep 0.8; for i in $(seq 1 4000); do echo "kill-line-${i}-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"; done; sleep 60',
+				cmd: 'printf "%0512d\\n" 0; sleep 0.8; for i in $(seq 1 4000); do echo "kill-line-${i}-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"; done; sleep 60',
 				yield_time_ms: 250,
 			});
 			const sid = started.details.session_id;
@@ -383,7 +385,7 @@ describe("unified-exec e2e", () => {
 			assert.ok(
 				await waitFor(() => {
 					try {
-						return readFileSync(logPath, "utf8").includes("kill-line-4000-");
+						return readFileSync(join(OUTPUT_LOG_DIRECTORY, logPath), "utf8").includes("kill-line-4000-");
 					} catch {
 						return false;
 					}
@@ -407,7 +409,7 @@ describe("unified-exec e2e", () => {
 				`kill content unexpectedly large: ${Buffer.byteLength(killed.content[0].text, "utf8")}`,
 			);
 
-			const fullLog = readFileSync(logPath, "utf8");
+			const fullLog = readFileSync(join(OUTPUT_LOG_DIRECTORY, logPath), "utf8");
 			assert.match(fullLog, /kill-line-1-/);
 			assert.match(fullLog, /kill-line-4000-/);
 			assert.ok(fullLog.split("\n").filter((line) => line.startsWith("kill-line-")).length >= 4000);
@@ -663,7 +665,7 @@ describe("unified-exec e2e", () => {
 		await h.emit("session_shutdown");
 	});
 
-	it("response includes cwd, command, yield_time_ms in details and header", async () => {
+	it("retains cwd, command, and yield_time_ms in details", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
 		const r = await h.call("exec_command", { cmd: "echo ok", yield_time_ms: 2000 });
@@ -671,23 +673,42 @@ describe("unified-exec e2e", () => {
 		assert.equal(r.details.cwd, process.cwd());
 		assert.equal(r.details.command, "echo ok");
 		assert.equal(r.details.yield_time_ms, 2000);
-		// cwd line appears in the LLM-visible header text
-		assert.ok(r.content[0].text.includes(`cwd: ${process.cwd()}`), `cwd header missing: ${r.content[0].text}`);
 		await h.emit("session_shutdown");
 	});
 
-	it("short command includes log_path and tty fields in details", async () => {
+	it("short output stays inline without a log file", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
 		const r = await h.call("exec_command", { cmd: "echo hello" });
 		assert.equal(r.details.exit_code, 0);
 		assert.equal(r.details.tty, false);
-		assert.ok(typeof r.details.log_path === "string" && r.details.log_path.length > 0, `log_path missing: ${JSON.stringify(r.details)}`);
-		assert.ok(existsSync(r.details.log_path), `log file should exist: ${r.details.log_path}`);
-		// log file should contain the full output verbatim.
-		const logContent = readFileSync(r.details.log_path, "utf-8");
-		assert.ok(logContent.includes("hello"), `log content: ${logContent}`);
+		assert.equal(r.details.log_path, undefined);
+		assert.match(r.details.output, /hello/);
 		await h.emit("session_shutdown");
+	});
+
+	it("archives the full stream when output crosses 512 bytes across tool calls", async () => {
+		const h = makeHarness();
+		await h.emit("session_start");
+		try {
+			const started = await h.call("exec_command", {
+				cmd: `node -e 'process.stdout.write("a".repeat(511)); process.stdin.once("data", () => process.stdout.write("b", () => process.exit(0)));'`,
+				yield_time_ms: 2000,
+			});
+			assert.equal(started.details.output, "a".repeat(511));
+			assert.equal(started.details.log_path, undefined);
+			const finished = await h.call("write_stdin", { session_id: started.details.session_id, chars: "go\n", yield_time_ms: 2000 });
+			assert.equal(finished.details.exit_code, 0);
+			assert.equal(finished.details.output, "b");
+			const filename = finished.details.log_path;
+			assert.equal(typeof filename, "string");
+			const path = join(OUTPUT_LOG_DIRECTORY, filename);
+			assert.equal(readFileSync(path, "utf8"), "a".repeat(511) + "b");
+			assert.ok(h.tools.exec_command.description.includes(OUTPUT_LOG_DIRECTORY));
+			assert.ok(h.tools.write_stdin.description.includes(OUTPUT_LOG_DIRECTORY));
+		} finally {
+			await h.emit("session_shutdown");
+		}
 	});
 
 	it("output over 50 KiB is tail-truncated with marker; log file has full bytes", async () => {
@@ -712,11 +733,8 @@ describe("unified-exec e2e", () => {
 		assert.ok(rendered.includes("Showing lines"), `missing truncation marker in rendered text`);
 		assert.ok(rendered.includes(r.details.log_path), `marker should reference log_path`);
 
-		// original_token_count should reflect the full ~210KB (not the truncated view).
-		assert.ok(r.details.original_token_count > 30_000, `original_token_count=${r.details.original_token_count}`);
-
 		// Log file should contain ALL 4000 lines — full retention on disk.
-		const logContent = readFileSync(r.details.log_path, "utf-8");
+		const logContent = readFileSync(join(OUTPUT_LOG_DIRECTORY, r.details.log_path), "utf-8");
 		const logLines = logContent.split("\n").filter((l) => l.length);
 		assert.equal(logLines.length, 4000, `log should have 4000 lines; got ${logLines.length}`);
 		await h.emit("session_shutdown");
@@ -743,24 +761,25 @@ describe("unified-exec e2e", () => {
 	it("list_sessions entries include log_path", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
-		const r1 = await h.call("exec_command", { cmd: "sleep 10", yield_time_ms: 200 });
+		const r1 = await h.call("exec_command", { cmd: 'printf "%0512d" 0; sleep 10', yield_time_ms: 200 });
 		const l = await h.call("list_sessions", {});
 		assert.equal(l.details.active_count, 1);
 		const entry = l.details.sessions[0];
 		assert.equal(entry.session_id, r1.details.session_id);
 		assert.equal(entry.log_path, r1.details.log_path);
-		assert.ok(existsSync(entry.log_path));
+		assert.ok(existsSync(join(OUTPUT_LOG_DIRECTORY, entry.log_path)));
 		await h.call("kill_session", { session_id: r1.details.session_id });
 		await h.emit("session_shutdown");
 	});
 
-	it("kill_session details include log_path", async () => {
+	it("kill_session omits the log for a silent session", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
 		const r1 = await h.call("exec_command", { cmd: "sleep 10", yield_time_ms: 200 });
 		const sid = r1.details.session_id;
 		const r2 = await h.call("kill_session", { session_id: sid });
 		assert.equal(r2.details.log_path, r1.details.log_path);
+		assert.equal(r2.details.log_path, undefined);
 		await h.emit("session_shutdown");
 	});
 

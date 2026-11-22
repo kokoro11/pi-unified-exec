@@ -9,8 +9,10 @@
 
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import extensionFactory from "../src/index.ts";
+import { OUTPUT_LOG_DIRECTORY } from "../src/output-log.ts";
 
 // Process-tool harness: the fake API has no codemode surfaces (see codemode-render tests).
 process.env.PI_UNIFIED_EXEC_COMPACT_CODEMODE = "0";
@@ -202,8 +204,7 @@ describe("write_stdin yield_until", () => {
 		assert.match(r2.details.yield_until, /Z$/);
 		assert.match(r2.details.tool_time_utc, /Z$/);
 		assert.ok(r2.details.output.includes("done-marker"), r2.details.output);
-		// Full output landed in the log too.
-		assert.ok(readFileSync(r2.details.log_path, "utf-8").includes("done-marker"));
+		assert.equal(r2.details.log_path, undefined, "short output remains inline");
 		await h.emit("session_shutdown");
 	});
 
@@ -306,7 +307,7 @@ describe("write_stdin bounded relative waits", () => {
 		assert.ok(r2.details.omitted_bytes > 1024 * 1024, "must retain head/tail, not accumulate every drained chunk");
 		assert.ok(Buffer.byteLength(r2.details.output) <= 50 * 1024);
 		assert.match(r2.details.output, /noisy-done/);
-		assert.ok(readFileSync(r2.details.log_path).length > 3 * 1024 * 1024);
+		assert.ok(readFileSync(join(OUTPUT_LOG_DIRECTORY, r2.details.log_path)).length > 3 * 1024 * 1024);
 		assert.ok(updates.length <= 3, `long waits must not heartbeat: ${updates.length} updates`);
 		assert.ok(updates.every(p => Buffer.byteLength(p.details.output) <= 32 * 1024));
 	});
@@ -315,13 +316,13 @@ describe("write_stdin bounded relative waits", () => {
 		const h = makeHarness();
 		await h.emit("session_start");
 		const r1 = await h.call("exec_command", {
-			cmd: "sleep 0.6; echo relative-cancel-marker; sleep 30",
+			cmd: 'printf "%0512d\\n" 0; sleep 0.6; echo relative-cancel-marker; sleep 30',
 			yield_time_ms: 250,
 		});
 		const ac = new AbortController();
 		const wait = h.call("write_stdin", { session_id: r1.details.session_id, yield_time_ms: Number.MAX_SAFE_INTEGER }, ac.signal);
 		try {
-			assert.ok(await waitFor(() => readFileSync(r1.details.log_path, "utf8").includes("relative-cancel-marker")));
+			assert.ok(await waitFor(() => readFileSync(join(OUTPUT_LOG_DIRECTORY, r1.details.log_path), "utf8").includes("relative-cancel-marker")));
 		} finally {
 			ac.abort();
 		}

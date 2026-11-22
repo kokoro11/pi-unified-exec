@@ -107,7 +107,7 @@ describe("script result projections", () => {
 		assert.ok(Value.Check(processScriptResultSchema, value));
 		assert.equal(value.details.truncated, true);
 		assert.ok(Buffer.byteLength(value.details.output) <= DEFAULT_MAX_BYTES);
-		assert.match(value.text, /\[Showing .+Full output: \/tmp\/session\.log\]/);
+		assert.match(value.text, /\[Showing .+Full output: session\.log\]/);
 	});
 
 	it("terminal control sequences never reach script output", () => {

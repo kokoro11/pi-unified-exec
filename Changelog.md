@@ -4,6 +4,8 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Simplify process and kill reply headers: remove redundant metadata and byte/token counters, use adaptive `wall_time` units, and report log filenames instead of repeated directories. Sessions below 512 raw output bytes stay in memory; at 512 bytes, archive the complete stream in the starting directory's `.temp/` folder. Tool descriptions provide the shared log directory.
+- Verified on Windows: `bun run test` passes 371 tests with one skip, including real CLI declaration parity and cross-call log threshold recovery. `bun run test:tui` skips 22 tmux cases on this platform; `bun pm pack --dry-run` includes all 23 release files.
 - Development, CI and the repo install path now run on bun. `bun.lock` replaces `package-lock.json`, `package.json` pins `packageManager: bun@1.4.2` and lists `@homebridge/node-pty-prebuilt-multiarch` in `trustedDependencies`, because bun skips the install scripts of untrusted packages and the bundled PTY prebuilds would otherwise never be wired up. Scripts lose their package-manager coupling (`test` calls `tsc --noEmit` directly); the CI matrix keeps Node 22/24 because the tests spawn real `node` processes.
 - The publish workflow installs and tests with bun but still publishes with the npm CLI, since `bun publish` does not perform npm's OIDC token exchange and Trusted Publisher needs npm 11.
 - Verified on Windows: `bun install --frozen-lockfile` reports no changes, `bun run test` passes 366 with one skip, `bun pm pack --dry-run` ships the same 22 files. No npm publication.

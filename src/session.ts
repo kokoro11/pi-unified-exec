@@ -9,14 +9,10 @@
  * to the subset we need for the pi extension.
  */
 
-import { randomBytes } from "node:crypto";
-import { closeSync, createWriteStream, openSync, type WriteStream } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
 import { type CollectResult, collectOutputUntilDeadline } from "./collect.ts";
 import { HeadTailBuffer } from "./head-tail-buffer.ts";
 import { Gate, Notify } from "./notify.ts";
+import { OutputLog } from "./output-log.ts";
 import { type SpawnedChild, spawnChild } from "./pty.ts";
 
 /** Default per-session output retention. */
@@ -53,9 +49,12 @@ export class ExecSession {
 	readonly displayCommand: string;
 	readonly cwd: string;
 	readonly startedAt: number;
-	/** Path to a log file that receives the full stdout+stderr stream. */
-	readonly logPath: string;
-	private logStream: WriteStream | undefined;
+	private readonly outputLog: OutputLog;
+
+	/** Full stdout+stderr archive, present once cumulative output reaches 512 bytes. */
+	get logPath(): string | undefined {
+		return this.outputLog.path;
+	}
 
 	/** Head+tail buffer drained by each collectOutputUntilDeadline() call. */
 	readonly outputBuffer: HeadTailBuffer;
@@ -99,33 +98,11 @@ export class ExecSession {
 		this.lastUsedAt = this.startedAt;
 		this.outputBuffer = new HeadTailBuffer(opts.headTailMaxBytes ?? DEFAULT_HEAD_TAIL_MAX_BYTES);
 		this.streamTailCap = opts.streamTailBytes ?? DEFAULT_STREAM_TAIL_BYTES;
-		this.logPath = join(tmpdir(), `pi-unified-exec-${id}-${randomBytes(4).toString("hex")}.log`);
+		this.outputLog = new OutputLog(id, (message) => this.recordFailure(message));
 	}
 
 	static spawn(id: number, opts: SessionSpawnOptions): ExecSession {
 		const self = new ExecSession(id, opts);
-
-		// Touch-create the file synchronously so it exists on disk from t=0
-		// even before the child writes anything (and before the lazy stream
-		// opens the fd on its first buffered write). Then open a stream in
-		// append mode for the actual writes.
-		try {
-			closeSync(openSync(self.logPath, "w"));
-			self.logStream = createWriteStream(self.logPath, { flags: "a" });
-			self.logStream.on("error", (err) => {
-				// Log-stream error (disk full, permissions, etc.). The child is
-				// still running: record the failure and stop mirroring writes, but
-				// do NOT mark the session exited — that would make it unkillable
-				// (kill() no-ops once hasExited) and orphan the process.
-				self.recordFailure(`log stream error: ${err?.message ?? err}`);
-				self.logStream = undefined;
-			});
-		} catch (err: any) {
-			self.markFailure(`failed to open log file ${self.logPath}: ${err?.message ?? err}`);
-			self.exitedAc.abort();
-			self.outputClosed.close();
-			return self;
-		}
 
 		try {
 			self.child = spawnChild({
@@ -139,8 +116,6 @@ export class ExecSession {
 			});
 		} catch (err: any) {
 			self.markFailure(err?.message ?? String(err));
-			self.logStream?.end();
-			self.logStream = undefined;
 			self.exitedAc.abort();
 			self.outputClosed.close();
 			return self;
@@ -150,9 +125,7 @@ export class ExecSession {
 			self.totalOutputBytes += chunk.length;
 			self.outputBuffer.pushChunk(chunk);
 			self.appendStreamTail(chunk);
-			// Mirror every byte to the log file. Errors are handled by the
-			// 'error' listener on the stream, which nulls `logStream` out.
-			self.logStream?.write(Buffer.from(chunk));
+			self.outputLog.write(chunk);
 			self.outputNotify.notifyAll();
 		});
 
@@ -172,22 +145,10 @@ export class ExecSession {
 			// in the buffer+log before we declare the session fully done.
 			setImmediate(() => {
 				self.outputNotify.notifyAll();
-				const stream = self.logStream;
-				self.logStream = undefined;
-				if (!stream) {
+				self.outputLog.close(() => {
 					self.outputClosed.close();
 					self.outputNotify.notifyAll();
-					return;
-				}
-				const finalize = () => {
-					self.outputClosed.close();
-					self.outputNotify.notifyAll();
-				};
-				// Wait for the stream to finish flushing before declaring
-				// `outputClosed` so consumers that await the drain see a
-				// fully-flushed log file on disk.
-				stream.once("close", finalize);
-				stream.end();
+				});
 			});
 		});
 
@@ -353,6 +314,6 @@ export class ExecSession {
 	/** Terminate + mark closed. Used by session-store LRU eviction / shutdown. */
 	terminate(signal: NodeJS.Signals = "SIGTERM"): void {
 		this.kill(signal);
-		// onExit closes logStream; terminate() is idempotent so this is fine.
+		// onExit closes the output log; terminate() is idempotent.
 	}
 }

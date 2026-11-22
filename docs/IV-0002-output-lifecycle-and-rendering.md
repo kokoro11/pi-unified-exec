@@ -19,7 +19,9 @@ expandable was not true for every tool.
 
 The initiative establishes a durable output contract across these layers:
 
-1. **Capture:** the child stream is mirrored to its session log.
+1. **Capture:** sessions below 512 raw output bytes stay in memory. At 512
+   cumulative bytes, the complete stream, including its buffered prefix, is
+   mirrored to a session log in `.temp/` under Pi's starting directory.
 2. **Model/session result:** every output-bearing result is a bounded,
    terminal-inert plain-text tail with explicit truncation/omission metadata and
    a recovery path.
@@ -96,6 +98,7 @@ The initiative establishes a durable output contract across these layers:
 |---|---|
 | Terminal-control scanner | `src/output-safety.ts` |
 | Shared output envelope, truncation, process/kill text | `src/tool-result.ts` |
+| Log threshold, complete-prefix flush, shared directory and filename projection | `src/output-log.ts` |
 | Codemode script schemas and projections | `src/script-result.ts`, `tests/script-result.test.ts` |
 | Kill collection, partial sanitization, and tool registration | `src/index.ts` (`TerminateOutcome`, `buildStreamUpdate`, `kill_session`) |
 | Explicit renderers and shared five-line preview | `src/render.ts` |
@@ -157,8 +160,9 @@ npm run test:tui
 On Pi 0.99.1 at 100×60, native object/settled result text components took 20/21 rows;
 the wrapper takes at most ten including summaries/spacers/footer. Multiline
 output keeps the original 36-more-lines hint when it fits. Actual CLI gates
-compare content after normalizing only the elapsed-time header, plus native
-declarations, mode/budget, default/legacy-exclusion/opt-out/MCP activation, search/model helpers
+compare content after normalizing the elapsed-time header and compare native
+declarations after normalizing each run's shared log directory. They also cover
+mode/budget, default/legacy-exclusion/opt-out/MCP activation, search/model helpers
 and all store entries. TUI gates exercise Ctrl+O expansion and recollapse at
 40/80/100 columns, regular/fullscreen and dark/system/light themes, with no
 generic renderer fallback. Re-run on Pi upgrades; local TUI evidence is Linux,
@@ -220,7 +224,9 @@ app.tools.expand again: five-line tail restored
 
 ### Output archive safety
 
-The current session log is complete but unbounded and relies on OS `/tmp`
+Session logs start at 512 raw output bytes and retain the complete stream in
+the starting directory's `.temp/` folder. Replies use filenames; tool descriptions
+state the shared absolute directory. Logs remain unbounded and require manual
 cleanup. A separate initiative should decide and test:
 
 - a configurable per-session archive cap with explicit unlimited opt-in;

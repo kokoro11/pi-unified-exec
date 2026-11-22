@@ -1,7 +1,14 @@
 /**
- * Shared human-readable duration formatters for TUI banners, widgets, and
- * wake metadata. Keep wall-clock math in callers; these only format ms → text.
+ * Shared human-readable duration formatters for tool replies, TUI banners,
+ * widgets, and wake metadata. Keep wall-clock math in callers.
  */
+
+/** Tool reply: integer ms below 1s, four significant digits below 1000s, then integer seconds. */
+export function formatWallTime(seconds: number): string {
+	if (seconds < 1) return `${Math.round(seconds * 1000)}ms`;
+	if (seconds < 1000) return `${seconds.toPrecision(4)}s`;
+	return `${Math.round(seconds)}s`;
+}
 
 /** Widget / session lists: floored seconds → `45s`, `2m05s`, `2h40m`. */
 export function formatElapsed(ms: number): string {

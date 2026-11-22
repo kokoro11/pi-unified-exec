@@ -17,7 +17,6 @@ describe("bounded tool results", () => {
 			operation: "exec_command",
 			wallTimeSec: 0.25,
 			collected: encoder.encode("hello\nworld\n"),
-			totalBytes: 12,
 			sessionId: 7,
 			exitCode: undefined,
 			signal: null,
@@ -34,7 +33,10 @@ describe("bounded tool results", () => {
 		assert.equal(details.running, true);
 		assert.equal(details.session_id, 7);
 		assert.equal(details.output, "hello\nworld\n");
-		assert.match(renderProcessResultText(details), /^\[still running\]/);
+		assert.equal(
+			renderProcessResultText(details),
+			"[still running]\nsession_id: 7\nlog_path: session.log\nwall_time: 250ms\n---\nhello\nworld\n",
+		);
 	});
 
 	it("bounds kill output and puts the recovery marker in model-visible text", () => {
@@ -42,7 +44,6 @@ describe("bounded tool results", () => {
 		const details = finalizeKillResult({
 			wallTimeSec: 0.5,
 			collected: encoder.encode(raw),
-			totalBytes: Buffer.byteLength(raw),
 			sessionId: 42,
 			pid: 1234,
 			requestedSignal: "SIGTERM",
@@ -68,9 +69,8 @@ describe("bounded tool results", () => {
 
 		const text = renderKillResultText(details);
 		assert.match(text, /^\[killed\]/);
-		assert.match(text, /requested_signal: SIGTERM/);
 		assert.match(text, /Showing lines/);
-		assert.match(text, /Full output: \/tmp\/full\.log/);
+		assert.match(text, /Full output: full\.log/);
 		assert.ok(Buffer.byteLength(text, "utf8") < DEFAULT_MAX_BYTES + 4096, `text bytes=${Buffer.byteLength(text)}`);
 	});
 

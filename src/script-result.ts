@@ -27,7 +27,9 @@ const outputFields = {
 	exit_code: Type.Optional(Type.Number({ description: "Exit code once the process has exited." })),
 	signal: Type.Optional(Type.String({ description: "Signal that terminated the process, if any." })),
 	failure_message: Type.Optional(Type.String()),
-	log_path: Type.Optional(Type.String({ description: "File containing the complete output stream." })),
+	log_path: Type.Optional(
+		Type.String({ description: "Log filename in the directory given in the tool description; present at 512 cumulative output bytes." }),
+	),
 	wall_time_seconds: Type.Number(),
 };
 

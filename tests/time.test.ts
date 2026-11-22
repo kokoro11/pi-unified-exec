@@ -5,8 +5,27 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { formatRemainingLater } from "../src/format-time.ts";
+import { formatRemainingLater, formatWallTime } from "../src/format-time.ts";
 import { MAX_EMPTY_POLL_ENV_VAR, nowUtcIso, parseYieldUntil, resolveEmptyPollYield, resolveMaxEmptyPollMs } from "../src/time.ts";
+
+describe("formatWallTime", () => {
+	it("uses milliseconds, four significant digits, and whole seconds at the requested boundaries", () => {
+		for (const [seconds, expected] of [
+			[0, "0ms"],
+			[0.012, "12ms"],
+			[0.999, "999ms"],
+			[1, "1.000s"],
+			[1.23456, "1.235s"],
+			[12.3456, "12.35s"],
+			[567.84, "567.8s"],
+			[999.96, "1000s"],
+			[1000, "1000s"],
+			[12345.6, "12346s"],
+		] as const) {
+			assert.equal(formatWallTime(seconds), expected);
+		}
+	});
+});
 
 describe("empty relative poll policy", () => {
 	it("keeps a short default and minimum, without a built-in maximum", () => {

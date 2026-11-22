@@ -1,4 +1,5 @@
 import { formatElapsedShort } from "./format-time.ts";
+import { logFileName } from "./output-log.ts";
 
 /**
  * CompletionCoordinator — agent-level completion scheduling for
@@ -477,7 +478,7 @@ export function buildWakeMessage(snapshots: CompletionSnapshot[]): WakeMessage {
 				`cwd: ${oneLine(s.cwd, 120)}${failure}`,
 		);
 		lines.push(`  command: ${oneLine(s.command, MAX_COMMAND_CHARS)}`);
-		if (s.logPath) lines.push(`  log_path: ${oneLine(s.logPath, 200)}`);
+		if (s.logPath) lines.push(`  log_path: ${oneLine(logFileName(s.logPath)!, 200)}`);
 	}
 	if (snapshots.length > shown.length) {
 		lines.push(`… and ${snapshots.length - shown.length} more (use list_sessions).`);
