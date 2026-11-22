@@ -45,7 +45,7 @@
     "@earendil-works/pi-tui": ">=0.99.1",
     "typebox": "*"
   },
-  "optionalDependencies": {
+  "dependencies": {
     "@homebridge/node-pty-prebuilt-multiarch": "0.15.0"
   },
   "devDependencies": {

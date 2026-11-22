@@ -44,8 +44,8 @@ pi install -l ./path/to/pi-unified-exec
 
 `@homebridge/node-pty-prebuilt-multiarch` bundles prebuilds in its npm package
 and falls back to a local build when the bundled binary is missing or fails
-to load. If installation fails, pipe mode (`tty: false`) still works and
-`tty: true` reports the load error at call time.
+to load. It is a required runtime dependency, so installation errors fail
+the package install.
 
 Verify the install:
 

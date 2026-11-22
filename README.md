@@ -91,10 +91,9 @@ pi install -l npm:pi-unified-exec         # project-local (.pi/settings.json)
 ```
 
 `pi install` runs `npm install` under the hood, which fetches
-`@homebridge/node-pty-prebuilt-multiarch`. The package bundles prebuilt
-binaries for Linux, macOS, and Windows. If the optional dependency fails
-to install, pipe mode (`tty: false`) still works and PTY mode (`tty: true`)
-reports the load error.
+`@homebridge/node-pty-prebuilt-multiarch` as a required runtime dependency.
+The package bundles prebuilt binaries for Linux, macOS, and Windows.
+Installation fails if this dependency cannot be installed.
 
 To try without installing:
 
