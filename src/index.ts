@@ -33,7 +33,7 @@ import { CompletionCoordinator, type OnExitPolicy, sanitizeMeta } from "./comple
 import { formatElapsed } from "./format-time.ts";
 import { type LongWaitOutcome, startRateLimitedStream, waitForExitOrDeadline } from "./long-wait.ts";
 import { sleep } from "./notify.ts";
-import { MIN_LOG_BYTES, OUTPUT_LOG_PATH_TEMPLATE } from "./output-log.ts";
+import { OUTPUT_LOG_PATH_TEMPLATE } from "./output-log.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
 import { getPtyLoadError, isPtyAvailable } from "./pty.ts";
 import {
@@ -1175,8 +1175,7 @@ export default function (pi: ExtensionAPI) {
 			'on_exit wake is set via exec_command or set_on_exit, not write_stdin. Observing an exit here consumes an armed wake (direct result). To disarm wake without killing, call set_on_exit(session_id, on_exit: "none").',
 			"In tty sessions, submit lines with \\r (the Enter key) rather than \\n: POSIX terminals accept both, but Windows console programs only execute input on \\r.",
 			"For very noisy jobs, rely on the log and final/truncated output instead of repeatedly polling.",
-			`For exec_command, write_stdin, kill_session, list_sessions: Output below ${MIN_LOG_BYTES} bytes has no log file. At ${MIN_LOG_BYTES} cumulative bytes, the full session output is archived. ` +
-				`log is a sequence number without an extension; read ${OUTPUT_LOG_PATH_TEMPLATE} under Pi's cwd for the full output.`,
+			`For exec_command, write_stdin, kill_session, list_sessions: If the tool output contains a log number, you can read ${OUTPUT_LOG_PATH_TEMPLATE.replace("<log>", "<log number>")} under Pi's cwd for the full command output`,
 			"For exec_command & write_stdin: In codemode, use r.details for structured data such as exit_code and session_id. To display the result, call text(r.text) directly.",
 		],
 		outputSchema: writeStdinScriptResultSchema,
