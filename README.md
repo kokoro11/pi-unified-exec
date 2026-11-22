@@ -168,6 +168,13 @@ Drives or polls an existing session.
 | `yield_time_ms` | number | `250` with input; `5_000` empty | Attachment window, not a process timeout. Input-bearing calls clamp to [250, 30_000]. Empty polls have a 5_000 minimum and no built-in maximum. Supply a non-negative finite number no greater than `Number.MAX_SAFE_INTEGER`; fractional milliseconds round down. An explicit operator cap rejects larger relative polls. Mutually exclusive with `yield_until`. |
 | `yield_until` | string | — | Absolute UTC deadline for an **empty poll only**, strict RFC 3339 UTC (`2026-07-21T18:30:00Z` or with `.mmm`; uppercase `Z`; no offsets/local time; real calendar dates only). **Only when the human explicitly asks** for a long attached wait or wall-clock deadline. The call stays attached until the process exits, the call is cancelled, or the deadline arrives — whichever is first. A past deadline is an immediate poll. No default max horizon. Mutually exclusive with `yield_time_ms` and with input bytes. |
 
+`total_time` measures the session from launch until the current result or
+session exit, whichever comes first. `wall_time` measures only this call.
+Scripts can read both as numeric seconds (`details.total_time_seconds` and
+`details.wall_time_seconds`). Formatted replies show `wait_status` only for
+`cancelled` and `interrupted_by_steer`; structured details retain normal
+completion and deadline outcomes.
+
 #### Waiting on long-running commands — the rules
 
 1. Use a finite `yield_time_ms` based on the expected job duration and how
@@ -177,8 +184,9 @@ Drives or polls an existing session.
 2. Use `yield_until` **only when the human explicitly asks** for a long
    attached wait or a wall-clock deadline on a **finite, non-interactive**
    command. Omit `yield_time_ms` and pass a future UTC timestamp ending in
-   `Z`, computed from `tool_time_utc`. The call returns early on process
-   exit; Esc leaves the process alive.
+   `Z`. The call returns early on process exit; Esc leaves the process alive.
+   If validation fails for `yield_until`, the error includes the host's
+   `current_utc_time`.
 3. `on_exit` defaults to `"none"`. Use `"wake"` **only when the human
    explicitly wants** auto-resume on unobserved completion. If you armed
    wake by mistake or the job is abandoned, call
@@ -374,10 +382,6 @@ reports each of them one final time (with `running: false`, `exit_code` /
 Each entry includes **`wake_armed: boolean`** (and the text listing marks
 live armed sessions with `[wake]`) so the model can audit which sessions will
 auto-resume on unobserved exit.
-
-The response also carries **`tool_time_utc`** (text trailer + details) so the
-model can compute a `yield_until` deadline from the trustworthy host clock
-without an extra probing call.
 
 ## Command
 
@@ -679,18 +683,18 @@ Killed session 1 (pid 12345) with SIGTERM — exit_code=143
 > exec_command(cmd="bun run test", yield_time_ms=1000, on_exit="wake")
 [still running]
 session_id: 2
+on_exit: wake
 completion_notification: armed
-tool_time_utc: 2026-07-21T08:30:00.000Z
+wall_time: 1s
 ---
 > test suite started
 
 > write_stdin(session_id=2, yield_until="2026-07-21T10:30:00Z")  # only if human asked for long attach
 [exited]
 exit_code: 0
-wait_mode: absolute
-wait_status: completed
-completion_delivery: direct
-on_exit_wake: consumed
+on_exit: wake
+wall_time: 14s
+total_time: 15s
 ---
 > all tests passed
 
@@ -762,7 +766,7 @@ The TUI cases skip on Windows or when tmux is unavailable. Set
 Pi version without changing package dependency pins.
 
 Tests cover yield_until timestamp validation (strict RFC 3339 UTC subset,
-impossible-date rejection, far-future acceptance, `tool_time_utc` on errors),
+impossible-date rejection, far-future acceptance, `current_utc_time` on errors),
 event-driven long-wait behavior (monotonic re-arm, multi-day timer chunking,
 cancellation, timer/listener cleanup, rate-limited streaming with no idle
 heartbeat), steer interrupts (gate confirmation/delivery, every wait form,

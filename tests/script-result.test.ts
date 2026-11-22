@@ -171,6 +171,7 @@ describe("registered tools return structuredContent", () => {
 		assert.equal(result.structuredContent.details.output, result.details.output);
 		assert.equal(result.structuredContent.details.output, "a\nb\n");
 		assert.equal(result.structuredContent.details.exit_code, 3);
+		assert.equal(Object.hasOwn(result.structuredContent.details, "total_time_seconds"), false);
 	});
 
 	it("write_stdin, list_sessions, set_on_exit and kill_session cover live and unknown sessions", async () => {
@@ -190,11 +191,15 @@ describe("registered tools return structuredContent", () => {
 		assert.equal(polled.structuredContent.details.running, true);
 		assert.equal(polled.structuredContent.details.session_id, sid);
 		assert.equal(polled.structuredContent.text, polled.content[0].text);
+		assert.ok(polled.structuredContent.details.total_time_seconds > polled.structuredContent.details.wall_time_seconds);
+		assert.match(polled.structuredContent.text, /^total_time: \d+(?:\.\d+)?s$/m);
+		assert.equal(Object.hasOwn(polled.structuredContent.details, "tool_time_utc"), false);
 
 		const listed = await call("list_sessions", {});
 		assert.ok(Value.Check(listSessionsScriptResultSchema, listed.structuredContent));
 		assertPlainJson(listed.structuredContent);
 		assert.ok(listed.structuredContent.sessions.some((s: any) => s.session_id === sid && s.running));
+		assert.equal(Object.hasOwn(listed.structuredContent, "tool_time_utc"), false);
 
 		const armed = await call("set_on_exit", { session_id: sid, on_exit: "wake" });
 		assert.ok(Value.Check(setOnExitScriptResultSchema, armed.structuredContent));

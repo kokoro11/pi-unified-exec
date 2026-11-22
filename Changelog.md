@@ -4,6 +4,8 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Show `wait_status` in formatted replies only when a wait is cancelled or interrupted by a steer; keep normal outcomes in structured results. Remove `tool_time_utc` from tool results and report `current_utc_time` on `yield_until` validation errors.
+- Report `total_time` on `write_stdin` results (`details.total_time_seconds` in scripts). It measures the session from launch until exit, while `wall_time` measures the current call.
 - Report sequential log IDs as integers without padding or a suffix, such as `1` or `10`. Store archives at `.temp/pi-unified-exec/<log>.log`, continue after existing numbers, and reserve each filename without overwriting other Pi processes' logs.
 - Run unit, integration, CLI and TUI tests with Bun's native test runner. Convert the TUI tests to TypeScript, remove `tsx`, and keep real Pi CLI subprocesses on Node.
 - Pin Bun to 1.4.4 for the Windows ConPTY integration tests.

@@ -42,6 +42,8 @@ export interface OutputResultDetails {
 export interface ProcessResultDetails extends OutputResultDetails {
 	operation: ProcessOperation;
 	status: ProcessStatus;
+	/** Lifetime of the session in seconds, reported by write_stdin. */
+	total_time_seconds?: number;
 	yield_time_ms?: number;
 	wait_mode?: "relative" | "absolute";
 	wait_status?:
@@ -56,7 +58,6 @@ export interface ProcessResultDetails extends OutputResultDetails {
 	completion_notification?: "armed";
 	completion_delivery?: "direct";
 	on_exit_wake?: "consumed";
-	tool_time_utc?: string;
 }
 
 export interface KillResultDetails extends OutputResultDetails {
@@ -216,12 +217,14 @@ export function renderProcessResultText(shape: ProcessResultDetails): string {
 	if (shape.signal) lines.push(`signal: ${safeMeta(shape.signal)}`);
 	if (shape.failure_message) lines.push(`failure: ${safeMeta(shape.failure_message)}`);
 	if (shape.note) lines.push(`note: ${safeMeta(shape.note)}`);
-	if (shape.wait_status) lines.push(`wait_status: ${safeMeta(shape.wait_status)}`);
+	if (shape.wait_status === "cancelled" || shape.wait_status === "interrupted_by_steer") {
+		lines.push(`wait_status: ${shape.wait_status}`);
+	}
 	if (shape.on_exit) lines.push(`on_exit: ${safeMeta(shape.on_exit)}`);
 	if (shape.completion_notification) lines.push(`completion_notification: ${safeMeta(shape.completion_notification)}`);
-	if (shape.tool_time_utc) lines.push(`tool_time_utc: ${safeMeta(shape.tool_time_utc)}`);
 	if (shape.log && !shape.truncation?.truncated) lines.push(`log: ${shape.log}`);
 	lines.push(`wall_time: ${formatWallTime(shape.wall_time_seconds)}`);
+	if (shape.total_time_seconds !== undefined) lines.push(`total_time: ${formatWallTime(shape.total_time_seconds)}`);
 	if (shape.omitted_bytes) lines.push(`omitted_bytes: ${shape.omitted_bytes}`);
 	return appendOutputSection(lines, shape);
 }

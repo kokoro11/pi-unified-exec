@@ -52,7 +52,7 @@ describe("empty relative poll policy", () => {
 		assert.equal(resolveMaxEmptyPollMs({ [MAX_EMPTY_POLL_ENV_VAR]: "  " }), undefined);
 		const env = { [MAX_EMPTY_POLL_ENV_VAR]: "900000" };
 		assert.equal(resolveEmptyPollYield(900_000, env), 900_000);
-		assert.throws(() => resolveEmptyPollYield(900_001, env), /configured empty-poll cap.*Request a shorter wait.*tool_time_utc/);
+		assert.throws(() => resolveEmptyPollYield(900_001, env), /configured empty-poll cap.*Request a shorter wait\.$/);
 		for (const raw of ["0", "-1", "NaN", "Infinity", "oops", "9007199254740992"]) {
 			assert.throws(() => resolveMaxEmptyPollMs({ [MAX_EMPTY_POLL_ENV_VAR]: raw }), /positive finite/);
 		}
@@ -137,14 +137,9 @@ describe("parseYieldUntil", () => {
 		assert.equal(week.remainingMs, 7 * 24 * 60 * 60 * 1000);
 	});
 
-	it("validation errors include the current host UTC time (tool_time_utc)", () => {
+	it("validation errors include the current host UTC time", () => {
 		for (const bad of ["not-a-time", "2026-02-30T00:00:00Z"]) {
-			try {
-				parseYieldUntil(bad, NOW);
-				assert.fail(`should have thrown for ${bad}`);
-			} catch (err) {
-				assert.match((err as Error).message, /tool_time_utc: 2026-07-21T08:30:00\.000Z/);
-			}
+			assert.throws(() => parseYieldUntil(bad, NOW), /current_utc_time: 2026-07-21T08:30:00\.000Z$/);
 		}
 	});
 });

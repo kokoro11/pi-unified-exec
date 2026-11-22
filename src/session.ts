@@ -49,7 +49,14 @@ export class ExecSession {
 	readonly displayCommand: string;
 	readonly cwd: string;
 	readonly startedAt: number;
+	private readonly startedAtMonotonic = performance.now();
+	private endedAtMonotonic: number | undefined;
 	private readonly outputLog: OutputLog;
+
+	/** Session lifetime, frozen at exit even if the caller collects the result later. */
+	get totalTimeSeconds(): number {
+		return ((this.endedAtMonotonic ?? performance.now()) - this.startedAtMonotonic) / 1000;
+	}
 
 	/** Sequence number of the full-output archive, once output reaches 512 bytes. */
 	get log(): number | undefined {
@@ -130,6 +137,7 @@ export class ExecSession {
 		});
 
 		self.child.onExit((exitCode, signal, failureMessage) => {
+			self.endedAtMonotonic = performance.now();
 			self.state = {
 				hasExited: true,
 				exitCode,
@@ -194,6 +202,7 @@ export class ExecSession {
 
 	/** Mark the session as failed-and-exited. Only for spawn-time failures. */
 	private markFailure(message: string): void {
+		this.endedAtMonotonic = performance.now();
 		this.state = {
 			hasExited: true,
 			exitCode: this.state.exitCode,

@@ -24,6 +24,12 @@ is not a prerequisite for long waits and this extension never overrides its
 cost policy or another extension's veto. Human-explicit absolute deadlines and
 completion wakes remain unchanged.
 
+Formatted replies show `wait_status` only for cancellation or a human steer;
+structured details also retain ordinary completion and deadline outcomes.
+`write_stdin` reports `total_time` from session launch until the current result
+or session exit. The host UTC clock is shown as `current_utc_time` only on
+`yield_until` validation errors.
+
 Validation uses `bun run test`, including the actual Pi CLI with a scripted local
 provider in `tests/cli-wait.test.ts`. Its synthetic 12-second cache lifetime
 schedules a refresh after two seconds while a 900,000 ms relative wait remains
@@ -102,7 +108,7 @@ attached waits should work (with safe `setTimeout` chunking).
 
 | Decision | Rationale |
 |---|---|
-| Humanize remaining time in TUI only; keep ISO in tool details | Model still needs machine-parseable deadlines via `tool_time_utc` / `yield_until`. |
+| Humanize remaining time in the TUI; keep the deadline in ISO form in tool details | Scripts can read the exact `yield_until` timestamp. |
 | Guide `yield_until` as **human-explicit only** | Prevents routine 290 s bypass and cache misses. |
 | Guide `on_exit: "wake"` as **human-explicit only** | Default stays `"none"`; reduces stale resumes. |
 | Add `set_on_exit` tool (disarm/re-arm without kill) | Model must be able to undo a mistaken wake while leaving the process running. |

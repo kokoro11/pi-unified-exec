@@ -162,6 +162,7 @@ describe("unified-exec renderers", () => {
 			signal: null,
 			failure: null,
 			tty: false,
+			extra: { total_time_seconds: 1.25 },
 		});
 		const nextResult = {
 			content: [{ type: "text", text: renderProcessResultText(nextDetails) }],
@@ -176,6 +177,7 @@ describe("unified-exec renderers", () => {
 		const nextText = rendered(next);
 		assert.match(nextText, /new-8/);
 		assert.doesNotMatch(nextText, /old-8/);
+		assert.match(nextText, /total 1\.25s/);
 	});
 
 	it("kill_session unknown-id results are compact errors", () => {
@@ -212,7 +214,7 @@ describe("unified-exec renderers", () => {
 		});
 		const result = {
 			content: [{ type: "text", text: "fallback should not render" }],
-			details: { sessions, active_count: 7, just_exited_count: 0, tool_time_utc: "2026-08-04T00:00:00.000Z" },
+			details: { sessions, active_count: 7, just_exited_count: 0 },
 		} as any;
 
 		const collapsed = renderListSessionsResult(result, { expanded: false, isPartial: false }, plainTheme, context({}));

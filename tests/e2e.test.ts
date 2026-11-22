@@ -194,6 +194,7 @@ describe("unified-exec e2e", () => {
 		await h.emit("session_start");
 		// 3 ticks @ 200ms = 600ms runtime. Yield at 250ms -> session_id returned.
 		// Then wait 800ms so the process exits, then poll.
+		const startedAt = performance.now();
 		const r1 = await h.call("exec_command", {
 			cmd: "for i in 1 2 3; do echo tock $i; sleep 0.2; done",
 			yield_time_ms: 250,
@@ -209,6 +210,7 @@ describe("unified-exec e2e", () => {
 
 		// Now poll — process has already exited, but the store should still have
 		// the entry so we can observe the exit and drain trailing output.
+		const secondsBeforePoll = (performance.now() - startedAt) / 1000;
 		const r2 = await h.call("write_stdin", {
 			session_id: sid,
 			chars: "",
@@ -217,6 +219,8 @@ describe("unified-exec e2e", () => {
 		assert.equal(r2.details.exit_code, 0, `expected exit_code=0; got ${JSON.stringify(r2.details)}`);
 		assert.equal(r2.details.session_id, undefined);
 		assert.ok(r2.details.output.includes("tock 3"), `expected 'tock 3' in output: ${r2.details.output}`);
+		const total = r2.details.total_time_seconds;
+		assert.ok(total >= 0.55 && total < secondsBeforePoll - 0.1, `total_time should stop at exit: ${JSON.stringify(r2.details)}`);
 		await h.emit("session_shutdown");
 	});
 
@@ -330,6 +334,7 @@ describe("unified-exec e2e", () => {
 		});
 		assert.ok(r2.details.output.includes("hello from stdin"), `got ${JSON.stringify(r2.details)}`);
 		assert.ok(typeof r2.details.session_id === "number");
+		assert.ok(r2.details.total_time_seconds > r2.details.wall_time_seconds);
 
 		// Send EOF so cat exits.
 		const r3 = await h.call("write_stdin", {

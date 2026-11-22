@@ -44,10 +44,12 @@ const processScriptDetailsSchema = Type.Object({
 		Type.Number({ description: "Present while the process is still running; drive it with write_stdin." }),
 	),
 	...outputFields,
+	total_time_seconds: Type.Optional(Type.Number({
+		description: "Session lifetime in seconds, reported by write_stdin; stops when the session exits.",
+	})),
 	note: Type.Optional(Type.String()),
 	wait_status: Type.Optional(Type.String()),
 	on_exit: Type.Optional(Type.Union([Type.Literal("none"), Type.Literal("wake")])),
-	tool_time_utc: Type.Optional(Type.String({ description: "Host UTC time, for computing yield_until deadlines." })),
 });
 
 export const processScriptResultSchema = Type.Object({
@@ -70,10 +72,10 @@ export function processScriptResult(shape: ProcessResultDetails): ProcessScriptR
 			failure_message: optionalMeta(shape.failure_message),
 			log: shape.log,
 			wall_time_seconds: shape.wall_time_seconds,
+			total_time_seconds: shape.total_time_seconds,
 			note: optionalMeta(shape.note),
 			wait_status: shape.wait_status,
 			on_exit: shape.on_exit,
-			tool_time_utc: shape.tool_time_utc,
 		}),
 		text: renderProcessResultText(shape),
 	};
@@ -162,7 +164,6 @@ export const listSessionsScriptResultSchema = Type.Object({
 	),
 	active_count: Type.Number(),
 	just_exited_count: Type.Number(),
-	tool_time_utc: Type.String(),
 });
 export type ListSessionsScriptResult = Static<typeof listSessionsScriptResultSchema>;
 
@@ -182,7 +183,6 @@ export function listSessionsScriptResult(value: {
 	}>;
 	active_count: number;
 	just_exited_count: number;
-	tool_time_utc: string;
 }): ListSessionsScriptResult {
 	return {
 		sessions: value.sessions.map((s) =>
@@ -202,6 +202,5 @@ export function listSessionsScriptResult(value: {
 		),
 		active_count: value.active_count,
 		just_exited_count: value.just_exited_count,
-		tool_time_utc: value.tool_time_utc,
 	};
 }

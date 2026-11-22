@@ -140,7 +140,7 @@ describe("write_stdin yield_until", () => {
 		const sid = r1.details.session_id;
 		await assert.rejects(
 			() => h.call("write_stdin", { session_id: sid, yield_time_ms: 5000, yield_until: inFuture(5000) }),
-			/not both.*tool_time_utc/s,
+			/not both.*current_utc_time: .+Z$/,
 		);
 		await h.call("kill_session", { session_id: sid });
 		await h.emit("session_shutdown");
@@ -153,12 +153,12 @@ describe("write_stdin yield_until", () => {
 		const sid = r1.details.session_id;
 		await assert.rejects(
 			() => h.call("write_stdin", { session_id: sid, chars: "hello\n", yield_until: inFuture(5000) }),
-			/only valid for an empty poll/,
+			/only valid for an empty poll.*current_utc_time: .+Z$/,
 		);
 		await assert.rejects(
 			// "aGk=" decodes to non-empty "hi"
 			() => h.call("write_stdin", { session_id: sid, chars_b64: "aGk=", yield_until: inFuture(5000) }),
-			/only valid for an empty poll/,
+			/only valid for an empty poll.*current_utc_time: .+Z$/,
 		);
 		// Explicit empty chars + yield_until is a valid empty poll.
 		const r2 = await h.call("write_stdin", { session_id: sid, chars: "", yield_until: inFuture(300) });
@@ -168,15 +168,15 @@ describe("write_stdin yield_until", () => {
 		await h.emit("session_shutdown");
 	});
 
-	it("rejects malformed timestamps at the tool boundary with tool_time_utc", async () => {
+	it("rejects malformed timestamps at the tool boundary with current_utc_time", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
 		const r1 = await h.call("exec_command", { cmd: "sleep 30", yield_time_ms: 250 });
 		const sid = r1.details.session_id;
-		for (const bad of ["2026-07-21 18:30:00", "2026-07-21T18:30:00+00:00", "2026-02-30T00:00:00Z"]) {
+		for (const bad of ["", "2026-07-21 18:30:00", "2026-07-21T18:30:00+00:00", "2026-02-30T00:00:00Z"]) {
 			await assert.rejects(
 				() => h.call("write_stdin", { session_id: sid, yield_until: bad }),
-				/tool_time_utc/,
+				/current_utc_time: .+Z$/,
 				`should reject ${bad}`,
 			);
 		}
@@ -199,7 +199,7 @@ describe("write_stdin yield_until", () => {
 		assert.equal(r2.details.wait_status, "completed");
 		assert.equal(r2.details.completion_delivery, "direct");
 		assert.match(r2.details.yield_until, /Z$/);
-		assert.match(r2.details.tool_time_utc, /Z$/);
+		assert.doesNotMatch(r2.content[0].text, /^(?:wait_status|tool_time_utc):/m);
 		assert.ok(r2.details.output.includes("done-marker"), r2.details.output);
 		assert.equal(r2.details.log, undefined, "short output remains inline");
 		await h.emit("session_shutdown");
@@ -216,7 +216,7 @@ describe("write_stdin yield_until", () => {
 		assert.equal(r2.details.wait_mode, "absolute");
 		assert.equal(r2.details.wait_status, "absolute_deadline_reached");
 		assert.ok(typeof r2.details.effective_wait_ms === "number" && r2.details.effective_wait_ms >= 500);
-		assert.match(r2.details.tool_time_utc, /Z$/);
+		assert.doesNotMatch(r2.content[0].text, /^(?:wait_status|tool_time_utc):/m);
 		await h.call("kill_session", { session_id: sid });
 		await h.emit("session_shutdown");
 	});
@@ -249,6 +249,7 @@ describe("write_stdin yield_until", () => {
 		const r2 = await inflight;
 		assert.equal(r2.details.session_id, sid, JSON.stringify(r2.details));
 		assert.equal(r2.details.wait_status, "cancelled");
+		assert.match(r2.content[0].text, /^wait_status: cancelled$/m);
 		assert.equal(r2.details.output, "", "cancelled waits must not drain output");
 
 		// The process survived; buffered output is still retrievable.

@@ -43,13 +43,13 @@ export function resolveEmptyPollYield(ms: number | undefined, env: NodeJS.Proces
 	if (cap !== undefined && duration > cap) {
 		throw new Error(
 			`write_stdin: yield_time_ms ${duration} exceeds the configured empty-poll cap of ${cap} ms ` +
-				`(${MAX_EMPTY_POLL_ENV_VAR}). Request a shorter wait. tool_time_utc: ${nowUtcIso()}`,
+				`(${MAX_EMPTY_POLL_ENV_VAR}). Request a shorter wait.`,
 		);
 	}
 	return duration;
 }
 
-/** Current host UTC time in ISO form — the trustworthy clock surfaced to the model. */
+/** Current host UTC time in ISO form, used in absolute-deadline errors. */
 export function nowUtcIso(nowMs: number = Date.now()): string {
 	return new Date(nowMs).toISOString();
 }
@@ -68,7 +68,7 @@ export interface ParsedYieldUntil {
 
 /**
  * Parse and validate a `yield_until` timestamp. Throws an actionable Error
- * (always including the current host UTC time as `tool_time_utc`) on:
+ * (always including the current host UTC time as `current_utc_time`) on:
  *   - malformed / non-UTC / offset timestamps
  *   - impossible calendar dates
  *
@@ -76,14 +76,13 @@ export interface ParsedYieldUntil {
  * (an immediate poll). There is no maximum future horizon.
  */
 export function parseYieldUntil(raw: string, nowMs: number): ParsedYieldUntil {
-	const toolTime = nowUtcIso(nowMs);
 	const m = RFC3339_UTC_RE.exec(raw);
 	if (!m) {
 		throw new Error(
 			`yield_until must be an RFC 3339 UTC timestamp like "2026-07-21T18:30:00Z" or ` +
 				`"2026-07-21T18:30:00.123Z" (complete date and time with seconds, 0-3 fractional digits, ` +
 				`uppercase trailing "Z"; offsets such as "+00:00" and local timestamps are rejected). ` +
-				`Got: "${raw}". tool_time_utc: ${toolTime}`,
+				`Got: "${raw}". current_utc_time: ${nowUtcIso(nowMs)}`,
 		);
 	}
 	const year = Number(m[1]);
@@ -108,7 +107,7 @@ export function parseYieldUntil(raw: string, nowMs: number): ParsedYieldUntil {
 	) {
 		throw new Error(
 			`yield_until "${raw}" is not a valid calendar date/time (it would be silently normalized ` +
-				`to ${roundTrip.toISOString()}). tool_time_utc: ${toolTime}`,
+				`to ${roundTrip.toISOString()}). current_utc_time: ${nowUtcIso(nowMs)}`,
 		);
 	}
 

@@ -370,7 +370,7 @@ async function runExecCommand(
 					on_exit: args.on_exit,
 					// Exit delivered in this very result: a requested wake is
 					// satisfied directly without ever being armed.
-					...(wantsWake ? { completion_delivery: "direct" as const, tool_time_utc: nowUtcIso() } : {}),
+					...(wantsWake ? { completion_delivery: "direct" as const } : {}),
 				},
 			});
 		}
@@ -429,7 +429,6 @@ async function runExecCommand(
 					on_exit: args.on_exit,
 					...(wantsWake ? { completion_notification: "armed" as const } : {}),
 					...(steered ? { wait_status: "interrupted_by_steer" as const } : {}),
-					tool_time_utc: nowUtcIso(),
 					note: steered ? steeredNote(session) : heldOpenNote(session),
 				},
 			});
@@ -452,7 +451,7 @@ async function runExecCommand(
 			yieldTimeMs,
 			extra: {
 				on_exit: args.on_exit,
-				...(wantsWake ? { completion_delivery: "direct" as const, tool_time_utc: nowUtcIso() } : {}),
+				...(wantsWake ? { completion_delivery: "direct" as const } : {}),
 			},
 		});
 	} finally {
@@ -462,6 +461,7 @@ async function runExecCommand(
 
 async function runWriteStdin(
 	ctx: ExtensionCtx,
+	session: ExecSession,
 	args: WriteStdinArgs,
 	signal: AbortSignal | undefined,
 	steerSignal: AbortSignal | undefined,
@@ -470,31 +470,27 @@ async function runWriteStdin(
 ): Promise<ResponseShape> {
 	const finalizeResponse = (input: FinalizeInput): ResponseShape =>
 		finalizeProcessResult({ ...input, operation: "write_stdin" });
-	const session = ctx.store.get(args.session_id);
-	if (!session) {
-		throw new Error(`unknown session_id: ${args.session_id}`);
-	}
 	const writeBytes = resolveWriteInput(args);
 	const isEmptyPoll = writeBytes === undefined || writeBytes.length === 0;
-	const hasYieldUntil = typeof args.yield_until === "string" && args.yield_until.length > 0;
+	const yieldUntil = args.yield_until;
 
 	// Relative durations and absolute UTC deadlines are mutually exclusive.
-	if (hasYieldUntil && args.yield_time_ms !== undefined) {
+	if (yieldUntil !== undefined && args.yield_time_ms !== undefined) {
 		throw new Error(
 			`write_stdin: pass either yield_time_ms (relative wait) or ` +
-				`yield_until (absolute UTC deadline), not both. tool_time_utc: ${nowUtcIso()}`,
+				`yield_until (absolute UTC deadline), not both. current_utc_time: ${nowUtcIso()}`,
 		);
 	}
 	// `yield_until` is only valid for an empty poll (no input bytes).
-	if (hasYieldUntil && !isEmptyPoll) {
+	if (yieldUntil !== undefined && !isEmptyPoll) {
 		throw new Error(
 			`write_stdin: yield_until is only valid for an empty poll (no non-empty chars or chars_b64). ` +
 				`Send the input with a relative yield_time_ms first, then follow up with an empty yield_until poll. ` +
-				`tool_time_utc: ${nowUtcIso()}`,
+				`current_utc_time: ${nowUtcIso()}`,
 		);
 	}
 	if (isEmptyPoll) {
-		const parsed = hasYieldUntil ? parseYieldUntil(args.yield_until!, Date.now()) : undefined;
+		const parsed = yieldUntil === undefined ? undefined : parseYieldUntil(yieldUntil, Date.now());
 		const wait: EmptyWait = parsed
 			? { mode: "absolute", durationMs: parsed.remainingMs, yieldUntil: parsed.normalized }
 			: { mode: "relative", durationMs: resolveEmptyPollYield(args.yield_time_ms) };
@@ -594,7 +590,6 @@ async function runWriteStdin(
 			command: session.displayCommand,
 			yieldTimeMs,
 			extra: {
-				tool_time_utc: nowUtcIso(),
 				...(armed ? { on_exit: "wake" as const, completion_notification: "armed" as const } : {}),
 				...(steered ? { wait_status: "interrupted_by_steer" as const } : {}),
 				note: steered ? steeredNote(session) : heldOpenNote(session),
@@ -616,7 +611,6 @@ function terminalWaitExtra(
 		wait_mode: waitMode,
 		wait_status: waitMode ? ("completed" as const) : undefined,
 		completion_delivery: "direct",
-		tool_time_utc: nowUtcIso(),
 		...(wakeWasArmed ? { on_exit: "wake" as const, on_exit_wake: "consumed" as const } : {}),
 	};
 }
@@ -678,7 +672,6 @@ async function runAttachedWait(
 				: outcome === "steered" ? "interrupted_by_steer"
 				: wait.mode === "relative" ? "relative_deadline_reached" : "absolute_deadline_reached";
 			extra.effective_wait_ms = elapsedMs;
-			extra.tool_time_utc = nowUtcIso();
 			extra.note = outcome === "steered" ? steeredNote(session) : heldOpenNote(session);
 			if (armed) {
 				extra.on_exit = "wake";
@@ -1181,7 +1174,7 @@ export default function (pi: ExtensionAPI) {
 		promptSnippet: "Send input to or poll a running session",
 		promptGuidelines: [
 			"Empty write_stdin polls default to 5 seconds and accept finite yield_time_ms durations with no built-in maximum. Choose a wait based on expected job duration and needed responsiveness, not cache lifetime. Exit or cancellation returns early; cancellation leaves the process alive. Respect any configured operator limit.",
-			'Use yield_until ONLY when the human explicitly asks for a long attached wait or an explicit UTC deadline. Omit yield_time_ms and pass a future UTC timestamp ending in "Z" (compute it from tool_time_utc in tool results). Finite non-interactive sessions only. The call returns immediately when the process exits.',
+			'Use yield_until ONLY when the human explicitly asks for a long attached wait or an explicit UTC deadline. Omit yield_time_ms and pass a future UTC timestamp ending in "Z". Finite non-interactive sessions only. The call returns immediately when the process exits.',
 			"NEVER use yield_until for REPLs, sudo, ssh, password prompts, dev servers, file watchers, debuggers, or any indefinite/interactive session — it is only for finite commands that will exit on their own.",
 			'on_exit wake is set via exec_command or set_on_exit, not write_stdin. Observing an exit here consumes an armed wake (direct result). To disarm wake without killing, call set_on_exit(session_id, on_exit: "none").',
 			"In tty sessions, submit lines with \\r (the Enter key) rather than \\n: POSIX terminals accept both, but Windows console programs only execute input on \\r.",
@@ -1216,7 +1209,10 @@ export default function (pi: ExtensionAPI) {
 		async execute(toolCallId, params, signal, onUpdate, eventCtx) {
 			ctx.ui ??= eventCtx.ui;
 			const steerSignal = steerSignalFor(ctx, toolCallId, eventCtx);
-			const shape = await runWriteStdin(ctx, params, signal, steerSignal, onUpdate, toolCallId);
+			const session = ctx.store.get(params.session_id);
+			if (!session) throw new Error(`unknown session_id: ${params.session_id}`);
+			const shape = await runWriteStdin(ctx, session, params, signal, steerSignal, onUpdate, toolCallId);
+			shape.total_time_seconds = session.totalTimeSeconds;
 			updateRunningSessionsUi(ctx);
 			const structuredContent = processScriptResult(shape);
 			return {
@@ -1294,7 +1290,6 @@ export default function (pi: ExtensionAPI) {
 					wake_armed: armed,
 					command: session?.displayCommand,
 					log: session?.log,
-					tool_time_utc: nowUtcIso(),
 				},
 			};
 		},
@@ -1418,7 +1413,6 @@ export default function (pi: ExtensionAPI) {
 					failure_message: s.failureMessage ?? undefined,
 					log: s.log,
 				}));
-			const toolTimeUtc = nowUtcIso();
 			const lines = sessions.length
 				? sessions.map((s) => {
 						const exitedSuffix = s.running
@@ -1434,15 +1428,12 @@ export default function (pi: ExtensionAPI) {
 				? `unified-exec sessions (${live.length} live, ${reaped.length} just exited):`
 				: `unified-exec sessions (${live.length}):`;
 			return {
-				// tool_time_utc lets the model compute a yield_until deadline from a
-				// trustworthy host clock without an extra probing call.
-				content: [{ type: "text", text: `${header}\n${lines.join("\n")}\ntool_time_utc: ${toolTimeUtc}` }],
-				details: { sessions, active_count: live.length, just_exited_count: reaped.length, tool_time_utc: toolTimeUtc },
+				content: [{ type: "text", text: `${header}\n${lines.join("\n")}` }],
+				details: { sessions, active_count: live.length, just_exited_count: reaped.length },
 				structuredContent: listSessionsScriptResult({
 					sessions,
 					active_count: live.length,
 					just_exited_count: reaped.length,
-					tool_time_utc: toolTimeUtc,
 				}),
 			};
 		},

@@ -23,7 +23,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Container, Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
 
-import { formatDurationSeconds, formatRemainingLater } from "./format-time.ts";
+import { formatDurationSeconds, formatRemainingLater, formatWallTime } from "./format-time.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
 import type { KillResultDetails, OutputResultDetails, ProcessResultDetails } from "./tool-result.ts";
 
@@ -57,6 +57,7 @@ interface DetailsShape extends Partial<OutputResultDetails> {
 	requested_signal?: string;
 	killed?: boolean;
 	escalated?: boolean;
+	total_time_seconds?: number;
 	yield_time_ms?: number;
 	yield_until?: string;
 	wait_status?: string;
@@ -83,7 +84,6 @@ interface ListSessionsDetails {
 	sessions?: SessionListItem[];
 	active_count?: number;
 	just_exited_count?: number;
-	tool_time_utc?: string;
 }
 
 function markStarted(state: RenderState, executionStarted: boolean): void {
@@ -376,6 +376,7 @@ function buildStatusLine(
 		const label = options.isPartial ? "elapsed" : details.running ? "yielded" : "took";
 		bits.push(`${label} ${duration}`);
 	}
+	if (typeof details.total_time_seconds === "number") bits.push(`total ${formatWallTime(details.total_time_seconds)}`);
 
 	if (details.operation === "kill_session") {
 		bits.push(
@@ -498,9 +499,6 @@ export function renderListSessionsResult(
 				cachedLines = undefined;
 			},
 		});
-	}
-	if (details.tool_time_utc) {
-		container.addChild(new Text(`\n${theme.fg("muted", `tool_time_utc: ${safeOneLine(details.tool_time_utc)}`)}`, 0, 0));
 	}
 	container.invalidate();
 	return container;
