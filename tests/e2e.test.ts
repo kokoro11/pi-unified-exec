@@ -201,6 +201,8 @@ describe("unified-exec e2e", () => {
 		assert.ok(r2.details.output.includes("tock 3"), `expected 'tock 3' in output: ${r2.details.output}`);
 		const total = r2.details.total_time_seconds;
 		assert.ok(total >= 0.55 && total < secondsBeforePoll - 0.1, `total_time should stop at exit: ${JSON.stringify(r2.details)}`);
+		assert.equal(r2.structuredContent?.details.session_id, sid);
+		assert.equal(r2.structuredContent?.details.total_time_seconds, total);
 		await assert.rejects(() => h.call("write_stdin", { session_id: sid }), /unknown session_id/);
 		await h.emit("session_shutdown");
 	});

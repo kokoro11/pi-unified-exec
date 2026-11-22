@@ -36,33 +36,41 @@ const outputFields = {
 	wall_time_seconds: Type.Number(),
 };
 
-const processScriptDetailsSchema = Type.Object({
+const processScriptDetailFields = {
 	status: Type.Union([Type.Literal("running"), Type.Literal("exited")]),
 	running: Type.Boolean(),
-	session_id: Type.Optional(
-		Type.Number({ description: "Session ID, retained on write_stdin exit results. Check running before polling again." }),
-	),
 	...outputFields,
-	total_time_seconds: Type.Optional(Type.Number({
-		description: "Session lifetime in seconds, reported by write_stdin; stops when the session exits.",
-	})),
 	note: Type.Optional(Type.String()),
 	wait_status: Type.Optional(Type.String()),
 	on_exit: Type.Optional(Type.Union([Type.Literal("none"), Type.Literal("wake")])),
-});
+};
 
-export const processScriptResultSchema = Type.Object({
-	details: processScriptDetailsSchema,
-	text: Type.String({ description: "Formatted tool reply with process status and output." }),
-});
-export type ProcessScriptResult = Static<typeof processScriptResultSchema>;
+const processTextSchema = Type.String({ description: "Formatted tool reply with process status and output." });
 
-export function processScriptResult(shape: ProcessResultDetails): ProcessScriptResult {
+export const execCommandScriptResultSchema = Type.Object({
+	details: Type.Object({
+		...processScriptDetailFields,
+		session_id: Type.Optional(Type.Number({ description: "Session ID when the command is still running." })),
+	}),
+	text: processTextSchema,
+});
+export type ExecCommandScriptResult = Static<typeof execCommandScriptResultSchema>;
+
+export const writeStdinScriptResultSchema = Type.Object({
+	details: Type.Object({
+		...processScriptDetailFields,
+		session_id: Type.Number({ description: "Session ID, retained on exit. Check running before polling again." }),
+		total_time_seconds: Type.Number({ description: "Session lifetime in seconds, frozen at exit." }),
+	}),
+	text: processTextSchema,
+});
+export type WriteStdinScriptResult = Static<typeof writeStdinScriptResultSchema>;
+
+function processScriptResult<T extends Record<string, unknown>>(shape: ProcessResultDetails, fields: T) {
 	return {
-		details: compact({
+		details: compact(Object.assign({
 			status: shape.status,
 			running: shape.running,
-			session_id: shape.session_id,
 			output: shape.output,
 			truncated: shape.truncation?.truncated === true,
 			omitted_bytes: shape.omitted_bytes || undefined,
@@ -71,13 +79,22 @@ export function processScriptResult(shape: ProcessResultDetails): ProcessScriptR
 			failure_message: optionalMeta(shape.failure_message),
 			log: shape.log,
 			wall_time_seconds: shape.wall_time_seconds,
-			total_time_seconds: shape.total_time_seconds,
 			note: optionalMeta(shape.note),
 			wait_status: shape.wait_status,
 			on_exit: shape.on_exit,
-		}),
+		}, fields)),
 		text: renderProcessResultText(shape),
 	};
+}
+
+export function execCommandScriptResult(shape: ProcessResultDetails): ExecCommandScriptResult {
+	return processScriptResult(shape, { session_id: shape.session_id });
+}
+
+export function writeStdinScriptResult(
+	shape: ProcessResultDetails & { session_id: number; total_time_seconds: number },
+): WriteStdinScriptResult {
+	return processScriptResult(shape, { session_id: shape.session_id, total_time_seconds: shape.total_time_seconds });
 }
 
 export const killScriptResultSchema = Type.Object({

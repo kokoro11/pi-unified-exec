@@ -12,12 +12,12 @@ import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
 
 import {
+	execCommandScriptResult,
+	execCommandScriptResultSchema,
 	killNotFoundScriptResult,
 	killScriptResult,
 	killScriptResultSchema,
 	listSessionsScriptResultSchema,
-	processScriptResult,
-	processScriptResultSchema,
 	setOnExitScriptResultSchema,
 } from "../src/script-result.ts";
 import { IS_WINDOWS } from "../src/shell.ts";
@@ -73,8 +73,8 @@ function makeHarness() {
 describe("script result projections", () => {
 	it("exited process: real newlines, exit code, schema-valid plain JSON", () => {
 		const details = finalizeProcessResult(processInput());
-		const value = processScriptResult(details);
-		assert.ok(Value.Check(processScriptResultSchema, value));
+		const value = execCommandScriptResult(details);
+		assert.ok(Value.Check(execCommandScriptResultSchema, value));
 		assertPlainJson(value);
 		assert.equal(value.details.status, "exited");
 		assert.equal(value.details.running, false);
@@ -86,16 +86,16 @@ describe("script result projections", () => {
 	});
 
 	it("running process exposes session_id; non-zero exit and signal are typed", () => {
-		const running = processScriptResult(finalizeProcessResult(processInput({ running: true, sessionId: 3, exitCode: undefined })));
-		assert.ok(Value.Check(processScriptResultSchema, running));
+		const running = execCommandScriptResult(finalizeProcessResult(processInput({ running: true, sessionId: 3, exitCode: undefined })));
+		assert.ok(Value.Check(execCommandScriptResultSchema, running));
 		assert.equal(running.details.status, "running");
 		assert.equal(running.details.session_id, 3);
 		assert.equal(running.details.exit_code, undefined);
 
-		const failed = processScriptResult(
+		const failed = execCommandScriptResult(
 			finalizeProcessResult(processInput({ exitCode: 2, signal: "SIGTERM", failure: "boom\nsecond line" })),
 		);
-		assert.ok(Value.Check(processScriptResultSchema, failed));
+		assert.ok(Value.Check(execCommandScriptResultSchema, failed));
 		assert.equal(failed.details.exit_code, 2);
 		assert.equal(failed.details.signal, "SIGTERM");
 		assert.equal(failed.details.failure_message, "boom second line", "metadata stays single-line and bounded");
@@ -103,8 +103,8 @@ describe("script result projections", () => {
 
 	it("truncated output is flagged and preserves UTF-8 within the byte cap", () => {
 		const big = "界".repeat(DEFAULT_MAX_BYTES);
-		const value = processScriptResult(finalizeProcessResult(processInput({ collected: encoder.encode(big) })));
-		assert.ok(Value.Check(processScriptResultSchema, value));
+		const value = execCommandScriptResult(finalizeProcessResult(processInput({ collected: encoder.encode(big) })));
+		assert.ok(Value.Check(execCommandScriptResultSchema, value));
 		assert.equal(value.details.truncated, true);
 		assert.ok(Buffer.byteLength(value.details.output) <= DEFAULT_MAX_BYTES);
 		assert.match(value.details.output, /^界+$/);
@@ -112,7 +112,7 @@ describe("script result projections", () => {
 	});
 
 	it("terminal control sequences never reach script output", () => {
-		const value = processScriptResult(
+		const value = execCommandScriptResult(
 			finalizeProcessResult(processInput({ collected: encoder.encode("\u001b[31mred\u001b[0m\u0007 ok\n") })),
 		);
 		assert.doesNotMatch(value.details.output, /\u001b|\u0007/);
@@ -226,12 +226,19 @@ describe("actual Pi codemode", () => {
 			const agentDir = join(root, "agent");
 			mkdirSync(agentDir);
 			const cmd = `node -e "for (let i = 1; i <= 40; i++) console.log('line of build output number', i)"`;
-			const script = [
-				`const r = await tools.exec_command(${JSON.stringify({ cmd, shell: IS_WINDOWS ? "cmd" : "bash", yield_time_ms: 5000 })});`,
-				'const decl = await describeTool("exec_command");',
-				'text({ exit_code: r.details.exit_code, lines: r.details.output.trimEnd().split("\\n").length, log: r.details.log, declared: /details:\\s*{/.test(decl) && /text:\\s*string/.test(decl) });',
-				"text(r.text);",
-			].join("\n");
+			const script = String.raw`
+const r = await tools.exec_command(${JSON.stringify({ cmd, shell: IS_WINDOWS ? "cmd" : "bash", yield_time_ms: 5000 })});
+const decl = await describeTool("exec_command");
+const pollDetails = (await describeTool("write_stdin")).split(/details:\s*\{/)[1];
+text({
+  exit_code: r.details.exit_code,
+  lines: r.details.output.trimEnd().split("\n").length,
+  log: r.details.log,
+  execDeclared: /details:\s*\{/.test(decl) && /text:\s*string/.test(decl) && !decl.includes("total_time_seconds"),
+  pollDeclared: /\bsession_id:\s*number\b/.test(pollDetails) && /\btotal_time_seconds:\s*number\b/.test(pollDetails),
+});
+text(r.text);
+`;
 			const provider = join(root, "provider.ts");
 			writeFileSync(
 				provider,
@@ -255,7 +262,7 @@ export default function(pi) {
 			const run = spawnSync("node", [
 				// No --no-extensions: codemode is a built-in extension. HOME and the agent dir are isolated.
 				cli, "--mode", "json", "--no-session", "--no-skills", "--no-prompt-templates", "--no-themes",
-				"-e", provider, "-e", extension, "--tools", "codemode,exec_command", "--provider", "exec-codemode", "--model", "faux-1", "run it",
+				"-e", provider, "-e", extension, "--tools", "codemode,exec_command,write_stdin", "--provider", "exec-codemode", "--model", "faux-1", "run it",
 			], {
 				cwd: root,
 				env: { ...process.env, HOME: root, PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "1" },
@@ -278,7 +285,7 @@ export default function(pi) {
 				.join("\n");
 			const summaryText = output.match(/^\{"exit_code".*\}$/m)?.[0];
 			assert.ok(summaryText, output);
-			assert.deepEqual(JSON.parse(summaryText), { exit_code: 0, lines: 40, log: 1, declared: true });
+			assert.deepEqual(JSON.parse(summaryText), { exit_code: 0, lines: 40, log: 1, execDeclared: true, pollDeclared: true });
 			assert.match(output, /^\[exited ok\]\n/m);
 			assert.match(output, /^log: 1$/m);
 			assert.match(output, /\n---\nline of build output number 1\n/);

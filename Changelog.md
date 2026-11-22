@@ -4,6 +4,7 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Place the shared log and Codemode rules at the end of the `write_stdin` guidance. Give Codemode separate result types: only `write_stdin` reports `total_time_seconds`, and its session ID and lifetime are required.
 - Refresh the agent-facing tool summaries and wait guidance, publish the log and Codemode rules once per prompt, and clarify that a failed kill leaves the session registered. Runtime behavior and defaults are unchanged.
 - Put installation before the README quick start, distinguish user actions from agent tool calls, and explain that the extension replaces Pi's built-in `bash` tool by default.
 - Show log numbers as `log=N` in terminal preview footers and expanded session lists. Tool replies and structured fields are unchanged.

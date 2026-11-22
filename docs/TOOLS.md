@@ -56,7 +56,7 @@ At 512 cumulative raw bytes, the extension starts archiving the full stream, inc
 
 ## Codemode
 
-`exec_command` and `write_stdin` return `{ details, text }` inside Codemode. Read fields such as `details.running`, `details.session_id`, and `details.exit_code` for control flow. `details.output` is the bounded text; `text(r.text)` prints the formatted reply with line breaks.
+`exec_command` and `write_stdin` return `{ details, text }` inside Codemode. `exec_command` includes `details.session_id` when the command is still running. `write_stdin` always includes `details.session_id` and `details.total_time_seconds`, even when it reports an exit. The total stops at exit. `details.output` is the bounded text; `text(r.text)` prints the formatted reply with line breaks.
 
 ```js
 const r = await tools.exec_command({ cmd: "git status --short" });

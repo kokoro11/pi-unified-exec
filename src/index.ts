@@ -48,15 +48,17 @@ import {
 	renderWriteStdinCall,
 } from "./render.ts";
 import {
+	execCommandScriptResult,
+	execCommandScriptResultSchema,
 	killNotFoundScriptResult,
 	killScriptResult,
 	killScriptResultSchema,
 	listSessionsScriptResult,
 	listSessionsScriptResultSchema,
-	processScriptResult,
-	processScriptResultSchema,
 	setOnExitScriptResult,
 	setOnExitScriptResultSchema,
+	writeStdinScriptResult,
+	writeStdinScriptResultSchema,
 } from "./script-result.ts";
 import { ExecSession } from "./session.ts";
 import { SessionStore } from "./session-store.ts";
@@ -99,13 +101,6 @@ const MAX_PTY_ROWS = 300;
 // Long empty polls use output-driven updates, never a periodic heartbeat.
 const LONG_WAIT_UPDATE_INTERVAL_MS = 30_000;
 const SESSION_UI_KEY = "unified-exec.sessions";
-
-// Pi includes each shared rule once, even when several of these tools are active.
-const OUTPUT_LOG_GUIDANCE =
-	`For exec_command, write_stdin, kill_session, list_sessions: Output below ${MIN_LOG_BYTES} bytes has no log file. At ${MIN_LOG_BYTES} cumulative bytes, the full session output is archived. ` +
-	`log is a sequence number without an extension; read ${OUTPUT_LOG_PATH_TEMPLATE} under Pi's cwd for the full output.`;
-const PROCESS_CODEMODE_GUIDANCE =
-	"For exec_command & write_stdin: In codemode, use r.details for structured data such as exit_code and session_id. To display the result, call text(r.text) directly.";
 
 /**
  * Google-compatible string enum schema (plain `type: "string"` + `enum`,
@@ -1119,10 +1114,8 @@ export default function (pi: ExtensionAPI) {
 			`For async/background tasks, you can start with a very low yield (${MIN_YIELD_TIME_MS}ms).`,
 			"Long-running commands return a session_id (#N) you can use to drive write_stdin.",
 			'A wait with wait_status "interrupted_by_steer" ended early because the user sent a steering message; the process is still running. Address the steer first and re-poll only if it is still relevant.',
-			OUTPUT_LOG_GUIDANCE,
-			PROCESS_CODEMODE_GUIDANCE,
 		],
-		outputSchema: processScriptResultSchema,
+		outputSchema: execCommandScriptResultSchema,
 		parameters: Type.Object({
 			cmd: Type.String({ description: "Shell command to execute." }),
 			workdir: Type.Optional(Type.String({ description: "Working directory. Defaults to the session cwd." })),
@@ -1159,7 +1152,7 @@ export default function (pi: ExtensionAPI) {
 			const steerSignal = steerSignalFor(ctx, toolCallId, eventCtx);
 			const shape = await runExecCommand(ctx, params, signal, steerSignal, onUpdate, eventCtx.cwd);
 			updateRunningSessionsUi(ctx);
-			const structuredContent = processScriptResult(shape);
+			const structuredContent = execCommandScriptResult(shape);
 			return {
 				content: [{ type: "text", text: structuredContent.text }],
 				details: shape,
@@ -1182,10 +1175,11 @@ export default function (pi: ExtensionAPI) {
 			'on_exit wake is set via exec_command or set_on_exit, not write_stdin. Observing an exit here consumes an armed wake (direct result). To disarm wake without killing, call set_on_exit(session_id, on_exit: "none").',
 			"In tty sessions, submit lines with \\r (the Enter key) rather than \\n: POSIX terminals accept both, but Windows console programs only execute input on \\r.",
 			"For very noisy jobs, rely on the log and final/truncated output instead of repeatedly polling.",
-			OUTPUT_LOG_GUIDANCE,
-			PROCESS_CODEMODE_GUIDANCE,
+			`For exec_command, write_stdin, kill_session, list_sessions: Output below ${MIN_LOG_BYTES} bytes has no log file. At ${MIN_LOG_BYTES} cumulative bytes, the full session output is archived. ` +
+				`log is a sequence number without an extension; read ${OUTPUT_LOG_PATH_TEMPLATE} under Pi's cwd for the full output.`,
+			"For exec_command & write_stdin: In codemode, use r.details for structured data such as exit_code and session_id. To display the result, call text(r.text) directly.",
 		],
-		outputSchema: processScriptResultSchema,
+		outputSchema: writeStdinScriptResultSchema,
 		parameters: Type.Object({
 			session_id: Type.Number({ description: "Session id from exec_command." }),
 			chars: Type.Optional(
@@ -1216,10 +1210,12 @@ export default function (pi: ExtensionAPI) {
 			const steerSignal = steerSignalFor(ctx, toolCallId, eventCtx);
 			const session = ctx.store.get(params.session_id);
 			if (!session) throw new Error(`unknown session_id: ${params.session_id}`);
-			const shape = await runWriteStdin(ctx, session, params, signal, steerSignal, onUpdate, toolCallId);
-			shape.total_time_seconds = session.totalTimeSeconds;
+			const shape = Object.assign(await runWriteStdin(ctx, session, params, signal, steerSignal, onUpdate, toolCallId), {
+				session_id: session.id,
+				total_time_seconds: session.totalTimeSeconds,
+			});
 			updateRunningSessionsUi(ctx);
-			const structuredContent = processScriptResult(shape);
+			const structuredContent = writeStdinScriptResult(shape);
 			return {
 				content: [{ type: "text", text: structuredContent.text }],
 				details: shape,
@@ -1305,7 +1301,6 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Terminate a session (SIGTERM, escalates to SIGKILL after 2s; on Windows any signal force-kills the process tree). A successful kill invalidates the session_id and suppresses any armed wake. If termination fails, the session remains registered.",
 		promptSnippet: "Terminate a session",
-		promptGuidelines: [OUTPUT_LOG_GUIDANCE],
 		outputSchema: killScriptResultSchema,
 		parameters: Type.Object({
 			session_id: Type.Number({ description: "Session to terminate." }),
@@ -1375,7 +1370,6 @@ export default function (pi: ExtensionAPI) {
 		label: "list_sessions",
 		description: "List live unified-exec sessions and unreported exits in this Pi run.",
 		promptSnippet: "List live sessions and unreported exits",
-		promptGuidelines: [OUTPUT_LOG_GUIDANCE],
 		outputSchema: listSessionsScriptResultSchema,
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, eventCtx) {
