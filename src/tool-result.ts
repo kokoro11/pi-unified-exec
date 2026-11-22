@@ -8,7 +8,6 @@ import {
 
 import type { OnExitPolicy } from "./completion.ts";
 import { formatWallTime } from "./format-time.ts";
-import { logFileName } from "./output-log.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
 
 const textDecoder = new TextDecoder("utf-8", { fatal: false });
@@ -74,7 +73,7 @@ export interface KillResultDetails extends OutputResultDetails {
 interface OutputEnvelopeInput {
 	wallTimeSec: number;
 	collected: Uint8Array;
-	logPath?: string;
+	log?: string;
 	/** Middle bytes dropped by the retention cap during this call's drain. */
 	omittedBytes?: number;
 }
@@ -133,7 +132,7 @@ function createOutputEnvelope(input: OutputEnvelopeInput): OutputEnvelope {
 		wall_time_seconds: input.wallTimeSec,
 		output: truncation.content,
 	};
-	if (input.logPath) envelope.log = logFileName(input.logPath);
+	if (input.log) envelope.log = input.log;
 	if (input.omittedBytes) envelope.omitted_bytes = input.omittedBytes;
 	if (truncation.truncated) envelope.truncation = truncation;
 	return envelope;
@@ -188,9 +187,9 @@ export function finalizeKillResult(input: FinalizeKillInput): KillResultDetails 
 }
 
 /** Pi-bash-style marker appended to model-visible text after a truncated body. */
-export function truncationMarker(t: TruncationResult | undefined, logPath: string | undefined): string | null {
+export function truncationMarker(t: TruncationResult | undefined, log: string | undefined): string | null {
 	if (!t?.truncated) return null;
-	const full = logPath ? `. Full output: ${safeMeta(logFileName(logPath)!)}` : "";
+	const full = log ? `. Full output: ${safeMeta(log)}` : "";
 	if (t.lastLinePartial) {
 		return `[Showing last ${formatSize(t.outputBytes)} of final line (line ${t.totalLines} is larger than the ${formatSize(DEFAULT_MAX_BYTES)} limit)${full}]`;
 	}

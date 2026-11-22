@@ -72,7 +72,7 @@ sibling view, indexed by concern:
 | Human duration / remaining labels | `src/format-time.ts` (re-exported remaining helper from `time.ts`) |
 | `on_exit: "wake"` completion scheduling (exactly-once) | `src/completion.ts` (`setOnExit`, tombstones, flush) |
 | In-memory drain buffer | `src/head-tail-buffer.ts` |
-| On-disk raw log file mirroring | `src/session.ts` (`logStream`) |
+| Raw log archive and sequence allocation | `src/output-log.ts`, owned by `ExecSession` |
 | Terminal-inert result/partial text | `src/output-safety.ts` |
 | Bounded process/kill details + LLM-visible text | `src/tool-result.ts` (`truncateTail` from Pi) |
 | C-style escape decoding for `chars` | `src/unescape.ts` |
@@ -243,9 +243,10 @@ the row cap; do not claim a hidden-row count after native preview truncation.
 
 ## Debugging aids
 
-- **Per-session log files** at `/tmp/pi-unified-exec-<sid>-*.log`
-  capture the complete raw byte stream the child wrote. Tail them to
-  diagnose ANSI / control-sequence issues.
+- **Per-session log files** at `.temp/pi-unified-exec/<log>.log` under Pi's
+  starting directory capture the complete raw byte stream the child wrote.
+  For example, `log: 001` refers to `001.log` in that directory. Inspect the
+  raw bytes to diagnose ANSI and other terminal control sequences.
 - **`details.output` vs `content[0].text`**: the LLM reads
   `content[0].text` (structured); the TUI renderer reads
   `details.output` (clean body). If the TUI shows a header like

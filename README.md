@@ -30,9 +30,9 @@ pi-flavor additions (`set_on_exit`, `kill_session`, `list_sessions`).
 - **Session-oriented, two-way I/O.** `exec_command` opens a long-lived
   session; the LLM keeps the `session_id` and drives the same process
   across turns by interleaving `write_stdin` writes and polls. Once cumulative
-  output reaches 512 bytes, the complete raw stream is archived in `.temp/`
-  under Pi's starting directory. Results provide a log filename; tool
-  descriptions provide the shared directory for full-history recovery.
+  output reaches 512 bytes, the complete raw stream is archived in
+  `.temp/pi-unified-exec/` under Pi's starting directory. Results show only
+  the log number, such as `001`.
 - **Independent process and attachment lifetimes.** Initial `exec_command`
   and input-bearing `write_stdin` calls yield within 30 seconds. Empty polls
   default to five seconds and accept finite relative durations without a
@@ -52,8 +52,8 @@ pi-flavor additions (`set_on_exit`, `kill_session`, `list_sessions`).
   it reaches model context or persisted details. All five tools have explicit
   TUI renderers; child output defaults to a five-visual-line tail and expands
   with Pi's configured `app.tools.expand` binding. Model/result/TUI text strips
-  terminal-control sequences; the complete raw stream remains available at
-`log`.
+  terminal-control sequences; the `log` number identifies the complete raw
+  archive when present.
 - **Default-on compact codemode previews.** A display-only wrapper bounds
   collapsed codemode results to ten visual rows, including object/settled
   output from any nested tool. Native execution and expansion are unchanged,
@@ -127,7 +127,7 @@ Response body (short output, no truncation):
 session_id: 1                       (mutually exclusive with exit_code)
 exit_code: 0                        (mutually exclusive with session_id)
 signal: SIGTERM                     (optional, if killed)
-log: pi-unified-exec-1-5cc5e104.log  (only once cumulative output reaches 512 bytes)
+log: 001  (only once cumulative output reaches 512 bytes)
 wall_time: 502ms
 omitted_bytes: 3145728              (only present when in-memory retention drops middle bytes)
 ---
@@ -142,7 +142,7 @@ remains numeric for scripts.
 
 If a chatty process produces more than the 1 MiB in-memory retention between
 polls, the middle is dropped and a marker is spliced at the exact omission
-point (the full stream is always in `log`):
+point (use `log` to locate the full stream):
 
 ```
 [... 3145728 bytes omitted here (output exceeded the 1048576-byte in-memory retention between polls; the full stream is in the session log file) ...]
@@ -153,7 +153,7 @@ When output exceeds the caps (50 KiB / 2000 lines), a footer is appended:
 ```
 ...tail of output...
 
-[Showing lines 3900-4120 of 4500 (50.0KB limit). Full output: pi-unified-exec-1-5cc5e104.log]
+[Showing lines 3900-4120 of 4500 (50.0KB limit). Full output: 001]
 ```
 
 ### `write_stdin`
@@ -327,7 +327,7 @@ Mechanics:
   current turn. Simultaneous completions are debounced into **one** bounded
   prompt.
 - The prompt contains bounded execution metadata only (session id, exit
-  code/signal, sanitized one-line command, cwd, elapsed time, log path,
+  code/signal, sanitized one-line command, cwd, elapsed time, log number,
   failure info) — never raw stdout/stderr. The exited session remains
   drainable via an empty `write_stdin` afterwards, and consuming that
   output never triggers a second wake.
@@ -335,7 +335,7 @@ Mechanics:
   eviction of a live process, and `session_shutdown` all suppress the wake
   (before signaling). A kill that fails to land restores eligibility. A
   naturally-exited wake session that gets evicted before notification keeps
-a bounded tombstone snapshot so its one wake (with `log`) is still
+  a bounded tombstone snapshot so its one wake (with `log`) is still
   delivered — unless `set_on_exit … none` disarms that tombstone by id.
   `list_sessions` reporting the exit first counts as direct observation and
   suppresses a not-yet-queued wake.
@@ -477,17 +477,17 @@ $ for i in {1..12}; do echo round $i; sleep 0.5; done (yield 2.5s · cwd: ~/proj
   round 4
   round 5
 
-elapsed 1.3s · session_id=2 · log: pi-unified-exec-2-86b3f006.log
+elapsed 1.3s · session_id=2 · log: 002
 ```
 
 **After yield, session still alive:**
 ```
-yielded 2.5s · session_id=2 · log: pi-unified-exec-2-86b3f006.log
+yielded 2.5s · session_id=2 · log: 002
 ```
 
 **After process exits:**
 ```
-took 4.2s · exit_code=0 · log: pi-unified-exec-1-5cc5e104.log
+took 4.2s · exit_code=0 · log: 001
 ```
 
 **write_stdin:**
@@ -518,11 +518,11 @@ last output line 2
 last output line 3
 last output line 4
 last output line 5
-took 0.3s · killed session_id=2 · signal=SIGTERM · log: pi-unified-exec-2-86b3f006.log
+took 0.3s · killed session_id=2 · signal=SIGTERM · log: 002
 ```
 
 **list_sessions** shows up to five compact entries while collapsed and all
-bounded entries plus log paths when expanded.
+bounded entries plus log numbers when expanded.
 
 **Running-session UI:** while any unified-exec process is still alive, the TUI
 footer shows `unified-exec: N sessions running`. After `/tree` navigation, a
@@ -535,7 +535,7 @@ preserving the usual lazy cleanup semantics.
 Use the configured
 `app.tools.expand` binding (Ctrl+O by default) to reveal the complete **bounded
 result**. Expansion never reads an arbitrary-size log synchronously; use
-`.temp/<log>` when the complete raw session stream is required. Raw PTY logs can
+`.temp/pi-unified-exec/<log>.log` for the complete raw stream. Raw PTY logs can
 contain terminal mode/clipboard sequences, so inspect them through `read`, a
 hex/escape visualizer, or another non-executing viewer rather than `cat`.
 
@@ -807,7 +807,7 @@ built-in `bash` tool that codex itself treats as unsolved:
 **1. Full output retained on disk, not just head+tail in memory.**
 Codex caps each session's in-memory buffer at 1 MiB and silently drops middle
 bytes once it fills. Sessions producing at least 512 bytes get a
-`.temp/pi-unified-exec-<sid>-<random>.log` file under Pi's starting directory.
+`.temp/pi-unified-exec/<log>.log` file under Pi's starting directory.
 The initial bytes are buffered until that threshold, then written with every
 subsequent byte. The archive contains the complete, unaltered stream across
 the session's lifetime. Smaller output stays inline without creating a file.
@@ -819,7 +819,8 @@ middle-truncated text). That's a bounded-but-generous context cost per call,
 and codex gives the LLM no way to recover the dropped middle. Our port
 tail-truncates per pi's `bash` tool and exposes `log` in the response
 header or truncation footer and tool-call details. To read the full output,
-read `.temp/<log>` under Pi's cwd, as stated in the tool description.
+read `.temp/pi-unified-exec/<log>.log` under Pi's cwd, as stated in the tool
+description.
 
 As a consequence we dropped codex's `max_output_tokens` parameter on both
 `exec_command` and `write_stdin`. The per-call cap is fixed; if the LLM
@@ -831,18 +832,20 @@ log file.
 | Session in-memory retention | 1 MiB head+tail (lossy) | 1 MiB head+tail (lossy) — same |
 | **Session full retention** | **none** | **full log file from 512 output bytes** |
 | LLM-visible per call | ≤40 KiB, middle-truncated | ≤50 KiB / ≤2000 lines, tail-truncated |
-| LLM-visible truncation recovery | none | Read the log filename under the shared directory |
+| LLM-visible truncation recovery | none | Use the log number to find its file in the shared directory |
 | Per-call `max_output_tokens` knob | yes (default 10 000) | removed; fixed 50 KiB/2000 lines |
 | Truncation marker in body | `…N tokens truncated…` | `[Showing lines X-Y of T. Full output: …]` |
 
-The optional `log` field is a filename, exposed after the session reaches
-512 raw output bytes in `exec_command`, `write_stdin`, `kill_session`, and
-`list_sessions` entries. Truncated replies include it once in their recovery
-footer. Tool descriptions use the fixed directory `.temp/` under Pi's cwd.
+The optional `log` field is a sequence number as a string, with no extension:
+`001`, `002`, and so on. It appears in `exec_command`, `write_stdin`,
+`kill_session`, and `list_sessions` once the session reaches 512 raw output
+bytes. Truncated replies include it in their recovery footer. For example,
+`log: 001` points to `.temp/pi-unified-exec/001.log`.
 
-Log files stay in `.temp/` under Pi's starting directory until manually cleaned
-up. This directory is shared by all sessions, including commands using a
-different `workdir`.
+The sequence starts after the highest existing number when Pi opens its
+first archive. Sessions share the archive directory under Pi's starting
+directory, even when a command uses a different `workdir`. Logs stay there
+until manually cleaned up.
 
 ## Other pi-flavor additions
 
@@ -908,7 +911,8 @@ Supported — both pipes and PTY mode:
   escalation-to-SIGKILL never happens (the first kill is already final).
   Tree-kill matters: killing only the shell would orphan grandchildren, which
   also hold the stdio pipes open and delay exit detection.
-- **Log files** use the same `.temp/` directory and 512-byte threshold as other platforms.
+- **Log files** use the same `.temp/pi-unified-exec/` directory and 512-byte
+  threshold as other platforms.
 - **Kill failures are reported, not hidden.** If `taskkill` doesn't land
   (access denied, protected process), `kill_session` says so and the session
   stays registered for retry — it is never silently dropped while the

@@ -62,7 +62,7 @@ describe("unified-exec renderers", () => {
 			signal: "SIGTERM",
 			failure: null,
 			tty: false,
-			logPath: "/tmp/kill.log",
+			log: "073",
 			cwd: "/repo",
 			command: "noisy job",
 			escalated: false,
@@ -80,6 +80,7 @@ describe("unified-exec renderers", () => {
 		assert.match(collapsedText, /earlier lines/);
 		assert.match(collapsedText.toLowerCase(), /to expand/);
 		assert.match(collapsedText, /killed session_id=73/);
+		assert.match(collapsedText, /log: 073$/m);
 
 		const expanded = renderKillSessionResult(
 			result,
@@ -190,7 +191,7 @@ describe("unified-exec renderers", () => {
 		assert.equal(rendered(component, 80).trim(), "No such session: 999");
 	});
 
-	it("list_sessions previews five entries, caches rows, and expands all entries with log paths", () => {
+	it("list_sessions previews five entries, caches rows, and expands all entries with log numbers", () => {
 		const sessions = Array.from({ length: 7 }, (_, index) => ({
 			session_id: index + 1,
 			command: `sleep ${index + 1}`,
@@ -200,7 +201,7 @@ describe("unified-exec renderers", () => {
 			elapsed_ms: 1000 * (index + 1),
 			running: true,
 			wake_armed: index === 0,
-			log: `/tmp/session-${index + 1}.log`,
+			log: String(index + 1).padStart(3, "0"),
 		}));
 		let firstCommandReads = 0;
 		Object.defineProperty(sessions[0], "command", {
@@ -232,7 +233,7 @@ describe("unified-exec renderers", () => {
 		);
 		const expandedText = rendered(expanded);
 		assert.match(expandedText, /#7 /);
-		assert.match(expandedText, /log: \/tmp\/session-7\.log/);
+		assert.match(expandedText, /log: 007$/m);
 		assert.doesNotMatch(expandedText, /more sessions/);
 	});
 });

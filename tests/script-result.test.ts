@@ -4,7 +4,7 @@
 
 import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "bun:test";
@@ -41,7 +41,7 @@ function processInput(overrides: Partial<Parameters<typeof finalizeProcessResult
 		signal: null,
 		failure: null,
 		tty: false,
-		logPath: "/tmp/session.log",
+		log: "001",
 		...overrides,
 	};
 }
@@ -107,7 +107,7 @@ describe("script result projections", () => {
 		assert.ok(Value.Check(processScriptResultSchema, value));
 		assert.equal(value.details.truncated, true);
 		assert.ok(Buffer.byteLength(value.details.output) <= DEFAULT_MAX_BYTES);
-		assert.match(value.text, /\[Showing .+Full output: session\.log\]/);
+		assert.match(value.text, /\[Showing .+Full output: 001\]/);
 	});
 
 	it("terminal control sequences never reach script output", () => {
@@ -222,7 +222,7 @@ describe("actual Pi codemode", () => {
 			const script = [
 				`const r = await tools.exec_command(${JSON.stringify({ cmd, shell: IS_WINDOWS ? "cmd" : "bash", yield_time_ms: 5000 })});`,
 				'const decl = await describeTool("exec_command");',
-				'text({ exit_code: r.details.exit_code, lines: r.details.output.trimEnd().split("\\n").length, declared: /details:\\s*{/.test(decl) && /text:\\s*string/.test(decl) });',
+				'text({ exit_code: r.details.exit_code, lines: r.details.output.trimEnd().split("\\n").length, log: r.details.log, declared: /details:\\s*{/.test(decl) && /text:\\s*string/.test(decl) });',
 				"text(r.text);",
 			].join("\n");
 			const provider = join(root, "provider.ts");
@@ -271,11 +271,14 @@ export default function(pi) {
 				.join("\n");
 			const summaryText = output.match(/^\{"exit_code".*\}$/m)?.[0];
 			assert.ok(summaryText, output);
-			assert.deepEqual(JSON.parse(summaryText), { exit_code: 0, lines: 40, declared: true });
+			assert.deepEqual(JSON.parse(summaryText), { exit_code: 0, lines: 40, log: "001", declared: true });
 			assert.match(output, /^\[exited\]\nexit_code: 0\n/m);
+			assert.match(output, /^log: 001$/m);
 			assert.match(output, /\n---\nline of build output number 1\n/);
 			assert.match(output, /^line of build output number 40$/m);
 			assert.match(run.stdout, /CODEMODE_OK/);
+			const archive = readFileSync(join(root, ".temp", "pi-unified-exec", "001.log"), "utf8");
+			assert.equal(archive.trimEnd().split("\n").length, 40);
 
 			// The pinned Pi renderer bounds the collapsed multiline preview.
 			const { codemodeRenderers } = await import(

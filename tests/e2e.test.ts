@@ -28,7 +28,7 @@ interface ToolDef {
 		signal: AbortSignal | undefined,
 		onUpdate: any,
 		ctx: any,
-	) => Promise<{ content: Array<{ type: string; text: string }>; details: any }>;
+	) => Promise<{ content: Array<{ type: string; text: string }>; details: any; structuredContent?: Record<string, any> }>;
 	renderCall?: (...args: any[]) => unknown;
 	renderResult?: (...args: any[]) => unknown;
 }
@@ -377,12 +377,13 @@ describe("unified-exec e2e", () => {
 			});
 			const sid = started.details.session_id;
 			assert.ok(typeof sid === "number", JSON.stringify(started.details));
-			const logPath = started.details.log;
-			assert.ok(typeof logPath === "string");
+			const log = started.details.log;
+			assert.match(log, /^\d{3,}$/);
+			const logPath = join(OUTPUT_LOG_DIRECTORY, `${log}.log`);
 			assert.ok(
 				await waitFor(() => {
 					try {
-						return readFileSync(join(OUTPUT_LOG_DIRECTORY, logPath), "utf8").includes("kill-line-4000-");
+						return readFileSync(logPath, "utf8").includes("kill-line-4000-");
 					} catch {
 						return false;
 					}
@@ -400,13 +401,15 @@ describe("unified-exec e2e", () => {
 			assert.equal(killed.details.truncation?.truncated, true, JSON.stringify(killed.details.truncation));
 			assert.match(killed.content[0].text, /^\[killed\]/);
 			assert.match(killed.content[0].text, /Showing lines/);
-			assert.match(killed.content[0].text, /Full output:/);
+			assert.equal(killed.details.log, log);
+			assert.equal(killed.structuredContent?.log, log);
+			assert.ok(killed.content[0].text.includes(`Full output: ${log}]`));
 			assert.ok(
 				Buffer.byteLength(killed.content[0].text, "utf8") < DEFAULT_MAX_BYTES + 4096,
 				`kill content unexpectedly large: ${Buffer.byteLength(killed.content[0].text, "utf8")}`,
 			);
 
-			const fullLog = readFileSync(join(OUTPUT_LOG_DIRECTORY, logPath), "utf8");
+			const fullLog = readFileSync(logPath, "utf8");
 			assert.match(fullLog, /kill-line-1-/);
 			assert.match(fullLog, /kill-line-4000-/);
 			assert.ok(fullLog.split("\n").filter((line) => line.startsWith("kill-line-")).length >= 4000);
@@ -697,9 +700,10 @@ describe("unified-exec e2e", () => {
 			const finished = await h.call("write_stdin", { session_id: started.details.session_id, chars: "go\n", yield_time_ms: 2000 });
 			assert.equal(finished.details.exit_code, 0);
 			assert.equal(finished.details.output, "b");
-			const filename = finished.details.log;
-			assert.equal(typeof filename, "string");
-			const path = join(".temp", filename);
+			const log = finished.details.log;
+			assert.match(log, /^\d{3,}$/);
+			assert.equal(finished.structuredContent?.details.log, log);
+			const path = join(".temp", "pi-unified-exec", `${log}.log`);
 			assert.equal(readFileSync(path, "utf8"), "a".repeat(511) + "b");
 		} finally {
 			await h.emit("session_shutdown");
@@ -726,11 +730,11 @@ describe("unified-exec e2e", () => {
 		// The rendered text (what actually goes to the LLM) includes the marker.
 		const rendered = r.content[0].text;
 		assert.ok(rendered.includes("Showing lines"), `missing truncation marker in rendered text`);
-		assert.ok(rendered.includes(r.details.log), `marker should reference log`);
+		assert.ok(rendered.includes(`Full output: ${r.details.log}]`), "marker should reference the log number");
 
 		// The reply has a bounded post-exit wait; a busy disk may still be
 		// flushing the log. Check it once the final line reaches disk.
-		const path = join(OUTPUT_LOG_DIRECTORY, r.details.log);
+		const path = join(OUTPUT_LOG_DIRECTORY, `${r.details.log}.log`);
 		let logContent = "";
 		assert.ok(await waitFor(() => {
 			logContent = readFileSync(path, "utf8");
@@ -768,7 +772,8 @@ describe("unified-exec e2e", () => {
 		const entry = l.details.sessions[0];
 		assert.equal(entry.session_id, r1.details.session_id);
 		assert.equal(entry.log, r1.details.log);
-		assert.ok(existsSync(join(OUTPUT_LOG_DIRECTORY, entry.log)));
+		assert.equal(l.structuredContent?.sessions[0].log, entry.log);
+		assert.ok(existsSync(join(OUTPUT_LOG_DIRECTORY, `${entry.log}.log`)));
 		await h.call("kill_session", { session_id: r1.details.session_id });
 		await h.emit("session_shutdown");
 	});

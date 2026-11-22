@@ -1,29 +1,65 @@
-import { randomBytes } from "node:crypto";
-import { createWriteStream, mkdirSync, openSync, type WriteStream } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { createWriteStream, mkdirSync, openSync, readdirSync, type WriteStream } from "node:fs";
+import { join, resolve } from "node:path";
 
 export const MIN_LOG_BYTES = 512;
-export const OUTPUT_LOG_DIRECTORY = resolve(".temp").replaceAll("\\", "/");
+const LOG_DIRECTORY = ".temp/pi-unified-exec";
+const LOG_EXTENSION = ".log";
+export const OUTPUT_LOG_DIRECTORY = resolve(LOG_DIRECTORY);
+export const OUTPUT_LOG_PATH_TEMPLATE = `${LOG_DIRECTORY}/<log>${LOG_EXTENSION}`;
 
-export function logFileName(path: string | undefined): string | undefined {
-	return path ? basename(path) : undefined;
+/** Allocate numbers from the existing archive; reserve each file exclusively. */
+export class OutputLogDirectory {
+	private next: number | undefined;
+
+	constructor(private readonly path: string) {}
+
+	open(): { id: string; stream: WriteStream } {
+		mkdirSync(this.path, { recursive: true });
+		if (this.next === undefined) {
+			let highest = 0;
+			for (const name of readdirSync(this.path)) {
+				if (!/^\d{3,}\.log$/.test(name)) continue;
+				const number = Number(name.slice(0, -LOG_EXTENSION.length));
+				if (Number.isSafeInteger(number) && number > highest) highest = number;
+			}
+			this.next = highest + 1;
+		}
+		while (Number.isSafeInteger(this.next)) {
+			const id = String(this.next).padStart(3, "0");
+			const path = join(this.path, id + LOG_EXTENSION);
+			let fd: number;
+			try {
+				fd = openSync(path, "wx");
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+				// Another Pi process already reserved this number.
+				this.next++;
+				continue;
+			}
+			this.next++;
+			return { id, stream: createWriteStream(path, { fd }) };
+		}
+		throw new Error("log sequence exhausted");
+	}
 }
+
+const defaultDirectory = new OutputLogDirectory(OUTPUT_LOG_DIRECTORY);
 
 /** Keep small output in memory; archive the complete stream once it reaches 512 bytes. */
 export class OutputLog {
-	private filePath: string | undefined;
+	private logId: string | undefined;
 	private stream: WriteStream | undefined;
 	private prefix: Uint8Array | undefined;
 	private prefixBytes = 0;
 	private stopped = false;
 
 	constructor(
-		private readonly sessionId: number,
 		private readonly onFailure: (message: string) => void,
+		private readonly directory = defaultDirectory,
 	) {}
 
-	get path(): string | undefined {
-		return this.filePath;
+	get id(): string | undefined {
+		return this.logId;
 	}
 
 	write(chunk: Uint8Array): void {
@@ -35,15 +71,14 @@ export class OutputLog {
 				this.prefixBytes += chunk.length;
 				return;
 			}
-			const path = join(OUTPUT_LOG_DIRECTORY, `pi-unified-exec-${this.sessionId}-${randomBytes(4).toString("hex")}.log`);
 			try {
-				mkdirSync(OUTPUT_LOG_DIRECTORY, { recursive: true });
-				this.stream = createWriteStream(path, { fd: openSync(path, "wx") });
-				this.filePath = path;
+				const { id, stream } = this.directory.open();
+				this.stream = stream;
+				this.logId = id;
 			} catch (error) {
 				this.stopped = true;
 				this.prefix = undefined;
-				this.onFailure(`failed to open log file ${path}: ${error instanceof Error ? error.message : String(error)}`);
+				this.onFailure(`failed to open log file: ${error instanceof Error ? error.message : String(error)}`);
 				return;
 			}
 			this.stream.on("error", (error) => {

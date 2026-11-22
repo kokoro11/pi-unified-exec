@@ -21,7 +21,8 @@ The initiative establishes a durable output contract across these layers:
 
 1. **Capture:** sessions below 512 raw output bytes stay in memory. At 512
    cumulative bytes, the complete stream, including its buffered prefix, is
-   mirrored to a session log in `.temp/` under Pi's starting directory.
+   mirrored to `.temp/pi-unified-exec/<log>.log` under Pi's starting directory.
+   Results show the sequence number without `.log`, such as `001`.
 2. **Model/session result:** every output-bearing result is a bounded,
    terminal-inert plain-text tail with explicit truncation/omission metadata and
    a recovery path.
@@ -98,7 +99,7 @@ The initiative establishes a durable output contract across these layers:
 |---|---|
 | Terminal-control scanner | `src/output-safety.ts` |
 | Shared output envelope, truncation, process/kill text | `src/tool-result.ts` |
-| Log threshold, complete-prefix flush, shared directory and filename projection | `src/output-log.ts` |
+| Log threshold, complete-prefix flush, sequence allocation and shared directory | `src/output-log.ts` |
 | Codemode script schemas and projections | `src/script-result.ts`, `tests/script-result.test.ts` |
 | Kill collection, partial sanitization, and tool registration | `src/index.ts` (`TerminateOutcome`, `buildStreamUpdate`, `kill_session`) |
 | Explicit renderers and shared five-line preview | `src/render.ts` |
@@ -224,10 +225,11 @@ app.tools.expand again: five-line tail restored
 
 ### Output archive safety
 
-Session logs start at 512 raw output bytes and retain the complete stream in
-the starting directory's `.temp/` folder. Replies use the filename field `log`;
-tool descriptions state `.temp/` under Pi's cwd. Logs remain unbounded and require manual
-cleanup. A separate initiative should decide and test:
+Session logs start at 512 raw output bytes and retain the complete stream at
+`.temp/pi-unified-exec/<log>.log` under Pi's starting directory. Replies carry
+only the sequence number in `log`. The allocator starts after the highest
+existing number and exclusively creates each file. Logs remain unbounded and
+require manual cleanup. A separate initiative should decide and test:
 
 - a configurable per-session archive cap with explicit unlimited opt-in;
 - `log_status: complete | partial | unavailable`, bytes written, and bounded

@@ -304,7 +304,7 @@ describe("write_stdin bounded relative waits", () => {
 		assert.ok(r2.details.omitted_bytes > 1024 * 1024, "must retain head/tail, not accumulate every drained chunk");
 		assert.ok(Buffer.byteLength(r2.details.output) <= 50 * 1024);
 		assert.match(r2.details.output, /noisy-done/);
-		assert.ok(readFileSync(join(OUTPUT_LOG_DIRECTORY, r2.details.log)).length > 3 * 1024 * 1024);
+		assert.ok(readFileSync(join(OUTPUT_LOG_DIRECTORY, `${r2.details.log}.log`)).length > 3 * 1024 * 1024);
 		assert.ok(updates.length <= 3, `long waits must not heartbeat: ${updates.length} updates`);
 		assert.ok(updates.every(p => Buffer.byteLength(p.details.output) <= 32 * 1024));
 	});
@@ -319,7 +319,7 @@ describe("write_stdin bounded relative waits", () => {
 		const ac = new AbortController();
 		const wait = h.call("write_stdin", { session_id: r1.details.session_id, yield_time_ms: Number.MAX_SAFE_INTEGER }, ac.signal);
 		try {
-			assert.ok(await waitFor(() => readFileSync(join(OUTPUT_LOG_DIRECTORY, r1.details.log), "utf8").includes("relative-cancel-marker")));
+			assert.ok(await waitFor(() => readFileSync(join(OUTPUT_LOG_DIRECTORY, `${r1.details.log}.log`), "utf8").includes("relative-cancel-marker")));
 		} finally {
 			ac.abort();
 		}

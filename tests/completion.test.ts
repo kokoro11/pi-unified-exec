@@ -21,7 +21,7 @@ class FakeSession implements CompletionSessionLike {
 	displayCommand = "sleep 99";
 	cwd = "/tmp/project";
 	startedAt = Date.now() - 1234;
-	logPath: string | undefined = "/tmp/pi-unified-exec-fake.log";
+	log: string | undefined = "015";
 	hasExited = false;
 	exitCode: number | null = null;
 	signal: string | null = null;
@@ -326,7 +326,9 @@ describe("CompletionCoordinator", () => {
 		coordinator.handleEviction(s); // store drops the session
 		await settle();
 		assert.equal(sent.length, 1, "completion must not be silently lost");
-		assert.match(sent[0].content, /log: pi-unified-exec-fake\.log/);
+		assert.match(sent[0].content, /^  log: 015$/m);
+		assert.match(sent[0].content, /\.temp\/pi-unified-exec\/<log>\.log/);
+		assert.equal(sent[0].details.sessions[0].log, "015");
 	});
 
 	it("a failed send is retried at the next flush trigger, still exactly once", async () => {
@@ -374,7 +376,7 @@ describe("buildWakeMessage", () => {
 			exitCode: 0,
 			signal: null,
 			failureMessage: null,
-			logPath: `/tmp/log-${i + 1}.log`,
+			log: String(i + 1).padStart(3, "0"),
 		}));
 		const msg = buildWakeMessage(snapshots);
 		assert.match(msg.content, /40 background sessions exited/);

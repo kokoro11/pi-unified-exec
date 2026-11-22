@@ -1,5 +1,5 @@
 import { formatElapsedShort } from "./format-time.ts";
-import { logFileName } from "./output-log.ts";
+import { OUTPUT_LOG_PATH_TEMPLATE } from "./output-log.ts";
 
 /**
  * CompletionCoordinator — agent-level completion scheduling for
@@ -38,7 +38,7 @@ export interface CompletionSessionLike {
 	readonly displayCommand: string;
 	readonly cwd: string;
 	readonly startedAt: number;
-	readonly logPath: string | undefined;
+	readonly log: string | undefined;
 	readonly hasExited: boolean;
 	readonly exitCode: number | null;
 	readonly signal: string | null;
@@ -56,7 +56,7 @@ export interface CompletionSnapshot {
 	exitCode: number | null;
 	signal: string | null;
 	failureMessage: string | null;
-	logPath: string | undefined;
+	log: string | undefined;
 }
 
 interface CompletionRecord {
@@ -222,7 +222,7 @@ export class CompletionCoordinator {
 			exitCode: s.exitCode,
 			signal: s.signal,
 			failureMessage: s.failureMessage,
-			logPath: s.logPath,
+			log: s.log,
 		};
 		this.scheduleFlush();
 	}
@@ -332,7 +332,7 @@ export class CompletionCoordinator {
 	 * A session was evicted from the store.
 	 *   - Live process (LRU terminating it): suppress the wake.
 	 *   - Naturally exited before notification: keep a bounded tombstone
-	 *     snapshot long enough to send the one wake (the log path survives in
+	 *     snapshot long enough to send the one wake (the log number survives in
 	 *     the snapshot even though the session can no longer be drained).
 	 */
 	handleEviction(session: CompletionSessionLike): void {
@@ -478,15 +478,15 @@ export function buildWakeMessage(snapshots: CompletionSnapshot[]): WakeMessage {
 				`cwd: ${oneLine(s.cwd, 120)}${failure}`,
 		);
 		lines.push(`  command: ${oneLine(s.command, MAX_COMMAND_CHARS)}`);
-		if (s.logPath) lines.push(`  log: ${oneLine(logFileName(s.logPath)!, 200)}`);
+		if (s.log) lines.push(`  log: ${oneLine(s.log, 200)}`);
 	}
 	if (snapshots.length > shown.length) {
 		lines.push(`… and ${snapshots.length - shown.length} more (use list_sessions).`);
 	}
 	lines.push(
 		"Final output has NOT necessarily been consumed: call write_stdin with no chars for each exited " +
-		"session_id to drain its final output, or read .temp/<log> (if a session_id is no longer known, " +
-		"use .temp/<log>). Then continue the original task — do not merely acknowledge this notification.",
+		`session_id to drain its final output, or, if a log number is listed, read ${OUTPUT_LOG_PATH_TEMPLATE} under Pi's cwd. ` +
+		"Then continue the original task — do not merely acknowledge this notification.",
 	);
 	return {
 		content: lines.join("\n"),

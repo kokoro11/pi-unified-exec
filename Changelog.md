@@ -4,6 +4,7 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Report sequential log IDs such as `001` without a suffix. Store archives at `.temp/pi-unified-exec/<log>.log`, continue after existing numbers, and reserve each filename without overwriting other Pi processes' logs.
 - Run unit, integration, CLI and TUI tests with Bun's native test runner. Convert the TUI tests to TypeScript, remove `tsx`, and keep real Pi CLI subprocesses on Node.
 - Pin Bun to 1.4.4 for the Windows ConPTY integration tests.
 - Make `@homebridge/node-pty-prebuilt-multiarch` a required runtime dependency, retaining the exact `0.15.0` version and Bun install-script trust. Dependency installation failures now fail the package install.

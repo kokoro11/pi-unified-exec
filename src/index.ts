@@ -19,8 +19,8 @@
  *     session; the next turn can still drive it.
  *   - Sessions are terminated on session_shutdown (codex parity).
  *   - Once a session produces 512 bytes, its complete output is archived in
- *     the starting directory's .temp/ folder. The LLM sees the last ~50 KiB
- *     / 2000 lines per call and a filename for full-output recovery.
+ *     the starting directory's .temp/pi-unified-exec/ folder. The LLM sees
+ *     the last ~50 KiB / 2000 lines per call and a log number for recovery.
  */
 
 import { constants as osConstants } from "node:os";
@@ -33,7 +33,7 @@ import { CompletionCoordinator, type OnExitPolicy, sanitizeMeta } from "./comple
 import { formatElapsed } from "./format-time.ts";
 import { type LongWaitOutcome, startRateLimitedStream, waitForExitOrDeadline } from "./long-wait.ts";
 import { sleep } from "./notify.ts";
-import { logFileName, MIN_LOG_BYTES } from "./output-log.ts";
+import { MIN_LOG_BYTES, OUTPUT_LOG_PATH_TEMPLATE } from "./output-log.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
 import { getPtyLoadError, isPtyAvailable } from "./pty.ts";
 import {
@@ -102,7 +102,7 @@ const SESSION_UI_KEY = "unified-exec.sessions";
 
 const OUTPUT_LOG_GUIDANCE =
 	`Output below ${MIN_LOG_BYTES} bytes has no log file. At ${MIN_LOG_BYTES} cumulative bytes, the full session output is archived. ` +
-	"log is a filename in .temp/ under Pi's cwd; read .temp/<log> for the full output.";
+	`log is a sequence number without an extension; read ${OUTPUT_LOG_PATH_TEMPLATE} under Pi's cwd for the full output.`;
 const PROCESS_CODEMODE_GUIDANCE =
 	"In codemode, use r.details for structured data such as exit_code and session_id. To display the result, call text(r.text) directly. " +
 	OUTPUT_LOG_GUIDANCE;
@@ -325,7 +325,6 @@ async function runExecCommand(
 			signal: null,
 			failure: session.failureMessage,
 			tty,
-			logPath: undefined, // spawn failed — no log file
 			cwd: effectiveCwd,
 			command: args.cmd,
 			yieldTimeMs,
@@ -363,7 +362,7 @@ async function runExecCommand(
 				signal: session.signal,
 				failure: session.failureMessage,
 				tty,
-				logPath: session.logPath,
+				log: session.log,
 				cwd: effectiveCwd,
 				command: args.cmd,
 				yieldTimeMs,
@@ -422,7 +421,7 @@ async function runExecCommand(
 				signal: null,
 				failure: null,
 				tty,
-				logPath: session.logPath,
+				log: session.log,
 				cwd: effectiveCwd,
 				command: args.cmd,
 				yieldTimeMs,
@@ -447,7 +446,7 @@ async function runExecCommand(
 			signal: session.signal,
 			failure: session.failureMessage,
 			tty,
-			logPath: session.logPath,
+			log: session.log,
 			cwd: effectiveCwd,
 			command: args.cmd,
 			yieldTimeMs,
@@ -534,7 +533,7 @@ async function runWriteStdin(
 					signal: session.signal,
 					failure: session.failureMessage,
 					tty: session.tty,
-					logPath: session.logPath,
+					log: session.log,
 					cwd: session.cwd,
 					command: session.displayCommand,
 					yieldTimeMs,
@@ -570,7 +569,7 @@ async function runWriteStdin(
 				signal: session.signal,
 				failure: session.failureMessage ?? writeFailure,
 				tty: session.tty,
-				logPath: session.logPath,
+				log: session.log,
 				cwd: session.cwd,
 				command: session.displayCommand,
 				yieldTimeMs,
@@ -590,7 +589,7 @@ async function runWriteStdin(
 			signal: null,
 			failure: writeFailure,
 			tty: session.tty,
-			logPath: session.logPath,
+			log: session.log,
 			cwd: session.cwd,
 			command: session.displayCommand,
 			yieldTimeMs,
@@ -696,7 +695,7 @@ async function runAttachedWait(
 			signal: outcome === "exit" ? session.signal : null,
 			failure: outcome === "exit" ? session.failureMessage : null,
 			tty: session.tty,
-			logPath: session.logPath,
+			log: session.log,
 			cwd: session.cwd,
 			command: session.displayCommand,
 			extra,
@@ -875,7 +874,7 @@ function buildStreamUpdate(
 			tty: session.tty,
 			command: session.displayCommand,
 			cwd: session.cwd,
-			log: logFileName(session.logPath),
+			log: session.log,
 			// Populate `output` so renderResult has a single source regardless
 			// of streaming vs final state.
 			output: tailText,
@@ -1294,7 +1293,7 @@ export default function (pi: ExtensionAPI) {
 					running,
 					wake_armed: armed,
 					command: session?.displayCommand,
-					log: logFileName(session?.logPath),
+					log: session?.log,
 					tool_time_utc: nowUtcIso(),
 				},
 			};
@@ -1358,7 +1357,7 @@ export default function (pi: ExtensionAPI) {
 				signal: session.signal,
 				failure: killFailure || null,
 				tty: session.tty,
-				logPath: session.logPath,
+				log: session.log,
 				cwd: session.cwd,
 				command: session.displayCommand,
 				escalated,
@@ -1417,7 +1416,7 @@ export default function (pi: ExtensionAPI) {
 					exit_code: s.hasExited ? s.exitCode : undefined,
 					signal: s.hasExited ? (s.signal ?? undefined) : undefined,
 					failure_message: s.failureMessage ?? undefined,
-					log: logFileName(s.logPath),
+					log: s.log,
 				}));
 			const toolTimeUtc = nowUtcIso();
 			const lines = sessions.length

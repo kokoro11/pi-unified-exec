@@ -51,9 +51,9 @@ export class ExecSession {
 	readonly startedAt: number;
 	private readonly outputLog: OutputLog;
 
-	/** Full stdout+stderr archive, present once cumulative output reaches 512 bytes. */
-	get logPath(): string | undefined {
-		return this.outputLog.path;
+	/** Sequence number of the full-output archive, once output reaches 512 bytes. */
+	get log(): string | undefined {
+		return this.outputLog.id;
 	}
 
 	/** Head+tail buffer drained by each collectOutputUntilDeadline() call. */
@@ -98,7 +98,7 @@ export class ExecSession {
 		this.lastUsedAt = this.startedAt;
 		this.outputBuffer = new HeadTailBuffer(opts.headTailMaxBytes ?? DEFAULT_HEAD_TAIL_MAX_BYTES);
 		this.streamTailCap = opts.streamTailBytes ?? DEFAULT_STREAM_TAIL_BYTES;
-		this.outputLog = new OutputLog(id, (message) => this.recordFailure(message));
+		this.outputLog = new OutputLog((message) => this.recordFailure(message));
 	}
 
 	static spawn(id: number, opts: SessionSpawnOptions): ExecSession {

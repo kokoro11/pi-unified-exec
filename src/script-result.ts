@@ -8,6 +8,7 @@
 import { Type, type Static } from "typebox";
 
 import type { OnExitPolicy } from "./completion.ts";
+import { MIN_LOG_BYTES, OUTPUT_LOG_PATH_TEMPLATE } from "./output-log.ts";
 import { type KillResultDetails, type ProcessResultDetails, renderProcessResultText, safeMeta } from "./tool-result.ts";
 
 const optionalMeta = (value: string | undefined): string | undefined => (value ? safeMeta(value) : undefined);
@@ -18,6 +19,11 @@ function compact<T extends Record<string, unknown>>(value: T): T {
 	return value;
 }
 
+const logSchema = Type.Optional(Type.String({
+	pattern: "^\\d{3,}$",
+	description: `Log sequence number; present at ${MIN_LOG_BYTES} cumulative output bytes. Read ${OUTPUT_LOG_PATH_TEMPLATE} under Pi's cwd.`,
+}));
+
 const outputFields = {
 	output: Type.String({
 		description: "Bounded, terminal-safe tail of the child output with real newlines.",
@@ -27,9 +33,7 @@ const outputFields = {
 	exit_code: Type.Optional(Type.Number({ description: "Exit code once the process has exited." })),
 	signal: Type.Optional(Type.String({ description: "Signal that terminated the process, if any." })),
 	failure_message: Type.Optional(Type.String()),
-	log: Type.Optional(
-		Type.String({ description: "Log filename in .temp/ under Pi's cwd; present at 512 cumulative output bytes." }),
-	),
+	log: logSchema,
 	wall_time_seconds: Type.Number(),
 };
 
@@ -153,7 +157,7 @@ export const listSessionsScriptResultSchema = Type.Object({
 			wake_armed: Type.Boolean(),
 			exit_code: Type.Optional(Type.Number()),
 			signal: Type.Optional(Type.String()),
-			log: Type.Optional(Type.String()),
+			log: logSchema,
 		}),
 	),
 	active_count: Type.Number(),
