@@ -3,9 +3,9 @@
 [![CI](https://github.com/kokoro11/pi-unified-exec/actions/workflows/ci.yml/badge.svg)](https://github.com/kokoro11/pi-unified-exec/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A [Pi](https://pi.dev/) extension for running shell commands in reusable sessions. Use it to start dev servers, drive REPLs, and check on builds across turns.
+A [Pi](https://pi.dev/) extension that gives agents reusable shell sessions so they can run dev servers, drive REPLs, and check on builds across turns.
 
-The extension replaces Pi's built-in `bash` tool by default. Use `exec_command` for both one-shot commands and long-running processes.
+The extension replaces Pi's built-in `bash` tool by default. Agents call `exec_command` for both one-shot commands and long-running processes.
 
 ## Install
 
@@ -28,11 +28,11 @@ Use exec_command with a 250 ms yield to run: echo ready; sleep 3; echo done
 Then poll the returned session with write_stdin and show me the final output.
 ```
 
-The extension's `exec_command` returns `[running #N]` for the live session. Pass `N` as `session_id` to `write_stdin`, which returns `[exited #N ok]` on successful completion. To stop a live process yourself, run `/unified-exec-sessions`.
+In this example, `exec_command` returns `[running #N]`. The agent passes `N` as `session_id` to `write_stdin`, which returns `[exited #N ok]` on successful completion. To stop a live process yourself, run `/unified-exec-sessions`.
 
 ## Tools
 
-| Tool | Use it to |
+| Tool | What the agent can do |
 | --- | --- |
 | `exec_command` | Start a shell command, optionally with a terminal (`tty: true`). |
 | `write_stdin` | Send input or poll an existing session without restarting the command. |
