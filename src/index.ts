@@ -100,12 +100,12 @@ const MAX_PTY_ROWS = 300;
 const LONG_WAIT_UPDATE_INTERVAL_MS = 30_000;
 const SESSION_UI_KEY = "unified-exec.sessions";
 
+// Pi includes each shared rule once, even when several of these tools are active.
 const OUTPUT_LOG_GUIDANCE =
-	`Output below ${MIN_LOG_BYTES} bytes has no log file. At ${MIN_LOG_BYTES} cumulative bytes, the full session output is archived. ` +
+	`For exec_command, write_stdin, kill_session, list_sessions: Output below ${MIN_LOG_BYTES} bytes has no log file. At ${MIN_LOG_BYTES} cumulative bytes, the full session output is archived. ` +
 	`log is a sequence number without an extension; read ${OUTPUT_LOG_PATH_TEMPLATE} under Pi's cwd for the full output.`;
 const PROCESS_CODEMODE_GUIDANCE =
-	"In codemode, use r.details for structured data such as exit_code and session_id. To display the result, call text(r.text) directly. " +
-	OUTPUT_LOG_GUIDANCE;
+	"For exec_command & write_stdin: In codemode, use r.details for structured data such as exit_code and session_id. To display the result, call text(r.text) directly.";
 
 /**
  * Google-compatible string enum schema (plain `type: "string"` + `enum`,
@@ -1111,15 +1111,16 @@ export default function (pi: ExtensionAPI) {
 		name: "exec_command",
 		label: "exec_command",
 		description:
-			'Run a command in a persistent session. `[running #N]` means pass N as session_id to write_stdin; `[exited ok]` or `[exited error N]` means the command finished. on_exit defaults to "none". Only pass on_exit: "wake" when the human explicitly wants auto-resume on unobserved exit — stale wakes interrupt later work. Use set_on_exit to disarm or re-arm a running session. ' +
-			PROCESS_CODEMODE_GUIDANCE,
-		promptSnippet: "Run a shell command; long-running ones yield a session_id",
+			'Run a command in a persistent session. `[running #N]` means pass N as session_id to write_stdin; `[exited ok]` or `[exited error N]` means the command finished. on_exit defaults to "none". Only pass on_exit: "wake" when the human explicitly wants auto-resume on unobserved exit — stale wakes interrupt later work. Use set_on_exit to disarm or re-arm a running session.',
+		promptSnippet: "Run a routine shell command or an async/interactive task",
 		promptGuidelines: [
-			"Prefer dedicated file tools when available (read/grep/find/ls). Otherwise use exec_command with fast shell tools: rg for content search, fd if available (or find) for file names, and ls for directories.",
-			"Use a small yield_time_ms (~500ms) for quick one-shots and the 10s default for most commands; long-running or interactive processes (dev servers, REPLs, ssh, sudo) return a session_id you then drive with write_stdin.",
-			"For a long non-interactive command, start with a short yield to obtain a session_id, then use an empty write_stdin poll with a finite yield_time_ms suited to its expected duration. There is no built-in empty-poll maximum; an operator may configure one. Keep waits short for interactive or indefinite processes. Pi manages cache warming independently.",
-			'on_exit defaults to "none". Prefer polling or human follow-up. Use on_exit: "wake" ONLY when the human explicitly wants auto-resume on unobserved completion — not for indefinite processes (dev servers, watchers). If you armed wake by mistake or the job is wrong/abandoned, call set_on_exit(session_id, on_exit: "none") promptly (does not kill the process). kill_session still kills and suppresses wake. Combining wake with an observing write_stdin is safe: direct completion consumes the wake.',
+			`exec_command: For routine commands do not set yield_time_ms to below ${DEFAULT_EXEC_YIELD_MS}, unless it's a background/async/interactive task. The yield_time_ms of the final write_stdin should also not be set below ${DEFAULT_EXEC_YIELD_MS}.`,
+			"For interactive tasks, start with a brief yield (1000ms). Don't set yield too low, you still need it to boot up.",
+			`For async/background tasks, you can start with a very low yield (${MIN_YIELD_TIME_MS}ms).`,
+			"Long-running commands return a session_id (#N) you can use to drive write_stdin.",
 			'A wait with wait_status "interrupted_by_steer" ended early because the user sent a steering message; the process is still running. Address the steer first and re-poll only if it is still relevant.',
+			OUTPUT_LOG_GUIDANCE,
+			PROCESS_CODEMODE_GUIDANCE,
 		],
 		outputSchema: processScriptResultSchema,
 		parameters: Type.Object({
@@ -1127,8 +1128,7 @@ export default function (pi: ExtensionAPI) {
 			workdir: Type.Optional(Type.String({ description: "Working directory. Defaults to the session cwd." })),
 			shell: Type.Optional(
 				Type.String({
-					description:
-						"Shell binary. Defaults to bash (on Windows: bash if on PATH, else powershell). cmd and powershell/pwsh get shell-appropriate flags.",
+					description: "Shell binary to run the command. Default is bash. On Windows you can also use cmd, powershell or pwsh.",
 				}),
 			),
 			tty: Type.Optional(Type.Boolean({ description: "Allocate a PTY. Default false (plain pipes)." })),
@@ -1174,16 +1174,16 @@ export default function (pi: ExtensionAPI) {
 		name: "write_stdin",
 		label: "write_stdin",
 		description:
-			"Write bytes to a running session. Omit both chars and chars_b64 to poll without writing. Use `chars` for text with C-style escapes (e.g. \\x03 Ctrl-C, \\x1b ESC, \\n newline); use `chars_b64` for raw binary. For empty polls, wait with a finite yield_time_ms (relative, no built-in maximum) or yield_until (absolute UTC deadline, only when the human explicitly asks). The reply keeps the session ID at exit; only poll again if it reports `[running #N]`. " +
-			PROCESS_CODEMODE_GUIDANCE,
-		promptSnippet: "Send input to or poll a running session",
+			"Write bytes to a running session. Omit both chars and chars_b64 to poll without writing. Use `chars` for text with C-style escapes (e.g. \\x03 Ctrl-C, \\x1b ESC, \\n newline); use `chars_b64` for raw binary. For empty polls, wait with a finite yield_time_ms (relative, no built-in maximum) or yield_until (absolute UTC deadline, only when the human explicitly asks). The reply keeps the session ID at exit; only poll again if it reports `[running #N]`.",
+		promptSnippet: "Send input, poll a session, or collect its exit result",
 		promptGuidelines: [
-			"Empty write_stdin polls default to 5 seconds and accept finite yield_time_ms durations with no built-in maximum. Choose a wait based on expected job duration and needed responsiveness, not cache lifetime. Exit or cancellation returns early; cancellation leaves the process alive. Respect any configured operator limit.",
-			'Use yield_until ONLY when the human explicitly asks for a long attached wait or an explicit UTC deadline. Omit yield_time_ms and pass a future UTC timestamp ending in "Z". Finite non-interactive sessions only. The call returns immediately when the process exits.',
-			"NEVER use yield_until for REPLs, sudo, ssh, password prompts, dev servers, file watchers, debuggers, or any indefinite/interactive session — it is only for finite commands that will exit on their own.",
+			"write_stdin: Don't use yield_time_ms and yield_until at the same time. Use yield_until only when the user requests a specific time.",
+			"Don't use chars and chars_b64 at the same time.",
 			'on_exit wake is set via exec_command or set_on_exit, not write_stdin. Observing an exit here consumes an armed wake (direct result). To disarm wake without killing, call set_on_exit(session_id, on_exit: "none").',
 			"In tty sessions, submit lines with \\r (the Enter key) rather than \\n: POSIX terminals accept both, but Windows console programs only execute input on \\r.",
 			"For very noisy jobs, rely on the log and final/truncated output instead of repeatedly polling.",
+			OUTPUT_LOG_GUIDANCE,
+			PROCESS_CODEMODE_GUIDANCE,
 		],
 		outputSchema: processScriptResultSchema,
 		parameters: Type.Object({
@@ -1201,13 +1201,13 @@ export default function (pi: ExtensionAPI) {
 			),
 			yield_time_ms: Type.Optional(
 				Type.Number({
-					description: `Attachment window in ms, not a process timeout. With input: default ${DEFAULT_WRITE_STDIN_YIELD_MS}, clamped to [${MIN_YIELD_TIME_MS}, ${MAX_YIELD_TIME_MS}]. Empty polls: default/minimum ${MIN_EMPTY_YIELD_TIME_MS}, no built-in maximum; an optional PI_UNIFIED_EXEC_MAX_EMPTY_POLL_MS limit rejects larger values. Use a non-negative finite number no greater than Number.MAX_SAFE_INTEGER; fractional ms are rounded down. Mutually exclusive with yield_until.`,
+					description: `Attachment window, same as exec_command. When input exists: default is ${DEFAULT_WRITE_STDIN_YIELD_MS}, clamped to [${MIN_YIELD_TIME_MS}, ${MAX_YIELD_TIME_MS}]. Otherwise, default/minimum is ${MIN_EMPTY_YIELD_TIME_MS}, no built-in maximum. Mutually exclusive with yield_until.`,
 				}),
 			),
 			yield_until: Type.Optional(
 				Type.String({
 					description:
-						'Absolute UTC deadline to stay attached to an EMPTY poll, as strict RFC 3339 UTC ("2026-07-21T18:30:00Z" or with .mmm; uppercase Z, full date+time with seconds; no offsets). Only when the human explicitly asks for a long attached wait. Returns immediately when the process exits. No default max horizon. Mutually exclusive with yield_time_ms and with input bytes.',
+						'Absolute UTC deadline to stay attached to an EMPTY poll, as strict RFC 3339 UTC ("2026-07-21T18:30:00Z"). Only when the human explicitly asks for a long attached wait. Returns immediately when the process exits. Mutually exclusive with yield_time_ms.',
 				}),
 			),
 		}),
@@ -1234,13 +1234,10 @@ export default function (pi: ExtensionAPI) {
 		name: "set_on_exit",
 		label: "set_on_exit",
 		description:
-			'Change on_exit policy for a session without killing it. on_exit: "none" disarms a pending wake (including coordinator tombstones after eviction). on_exit: "wake" arms auto-resume if the process is still running. Cannot recall a follow-up already queued to the agent. kill_session both kills and suppresses.',
+			'Change on_exit policy for a session without killing it. on_exit: "none" disarms a pending wake. on_exit: "wake" arms auto-resume if the process is still running. This tool cannot recall a follow-up already queued to the agent. kill_session both kills and suppresses.',
 		promptSnippet: "Disarm or re-arm on_exit wake for a session",
 		promptGuidelines: [
-			'Default on_exit is "none". If you set "wake" and no longer need auto-resume (wrong command, user moved on, abandoned approach), call set_on_exit with "none" promptly — do not leave stale wakes armed.',
-			"This does not stop the process. Use kill_session to terminate.",
-			"Prefer arming wake only when the human explicitly asked for auto-resume.",
-			"Disarm cannot recall a completion follow-up that was already delivered to pi.",
+			'set_on_exit: If you set "wake" and no longer need auto-resume, call set_on_exit with "none" promptly. Only use wake when the user asked for auto-resume.',
 		],
 		outputSchema: setOnExitScriptResultSchema,
 		parameters: Type.Object({
@@ -1306,9 +1303,9 @@ export default function (pi: ExtensionAPI) {
 		name: "kill_session",
 		label: "kill_session",
 		description:
-			"Terminate a session (SIGTERM, escalates to SIGKILL after 2s; on Windows any signal force-kills the process tree). Use when the process won't exit via Ctrl-C. session_id is invalid after. Also suppresses any armed on_exit wake. " +
-			OUTPUT_LOG_GUIDANCE,
+			"Terminate a session (SIGTERM, escalates to SIGKILL after 2s; on Windows any signal force-kills the process tree). A successful kill invalidates the session_id and suppresses any armed wake. If termination fails, the session remains registered.",
 		promptSnippet: "Terminate a session",
+		promptGuidelines: [OUTPUT_LOG_GUIDANCE],
 		outputSchema: killScriptResultSchema,
 		parameters: Type.Object({
 			session_id: Type.Number({ description: "Session to terminate." }),
@@ -1376,8 +1373,9 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "list_sessions",
 		label: "list_sessions",
-		description: "List all live unified-exec sessions in this pi run. " + OUTPUT_LOG_GUIDANCE,
-		promptSnippet: "List live sessions",
+		description: "List live unified-exec sessions and unreported exits in this Pi run.",
+		promptSnippet: "List live sessions and unreported exits",
+		promptGuidelines: [OUTPUT_LOG_GUIDANCE],
 		outputSchema: listSessionsScriptResultSchema,
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, eventCtx) {

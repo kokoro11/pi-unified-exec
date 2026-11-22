@@ -4,6 +4,7 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Refresh the agent-facing tool summaries and wait guidance, publish the log and Codemode rules once per prompt, and clarify that a failed kill leaves the session registered. Runtime behavior and defaults are unchanged.
 - Put installation before the README quick start, distinguish user actions from agent tool calls, and explain that the extension replaces Pi's built-in `bash` tool by default.
 - Show log numbers as `log=N` in terminal preview footers and expanded session lists. Tool replies and structured fields are unchanged.
 - Move package distribution and repository links to `kokoro11/pi-unified-exec` on GitHub. Disable npm publication and retire the upstream interaction-limit reminder.

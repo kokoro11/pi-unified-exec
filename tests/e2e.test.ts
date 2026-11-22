@@ -19,9 +19,6 @@ import { activateProcessTools } from "./fixtures/process-tools.ts";
 
 interface ToolDef {
 	name: string;
-	description: string;
-	promptGuidelines?: string[];
-	parameters: unknown;
 	execute: (
 		toolCallId: string,
 		params: any,
@@ -112,17 +109,6 @@ async function waitFor(cond: () => boolean, timeoutMs = 8000): Promise<boolean> 
 }
 
 describe("unified-exec e2e", () => {
-	it("describes uncapped empty waits without cache-TTL polling guidance", () => {
-		const h = makeHarness();
-		for (const name of ["exec_command", "write_stdin"]) {
-			const tool = h.tools[name];
-			const prompt = JSON.stringify([tool.description, tool.promptGuidelines, tool.parameters]);
-			assert.doesNotMatch(prompt, /290|cache-friendly/);
-			assert.match(prompt, /no built-in (?:empty-poll )?maximum/i);
-		}
-		assert.match(h.tools.write_stdin.promptGuidelines!.join("\n"), /yield_until ONLY when the human explicitly asks/);
-	});
-
 	it("registers explicit call/result renderers for every unified-exec tool", () => {
 		const h = makeHarness();
 		for (const name of ["exec_command", "write_stdin", "set_on_exit", "kill_session", "list_sessions"]) {

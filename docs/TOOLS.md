@@ -29,7 +29,7 @@ Takes a `session_id` from `exec_command`. Omit input to poll, or send input befo
 
 ### Waiting and cancellation
 
-- A yield or deadline ends the current wait and leaves the process running. Choose a finite relative duration that fits the job. Use `yield_until` only when the human requests a long attached wait or a UTC deadline for a finite, non-interactive job. Use short relative polls for REPLs, dev servers, and other ongoing or interactive work.
+- A yield or deadline ends the current wait and leaves the process running. Choose a finite relative duration that fits the job. Use `yield_until` only when the human requests a specific deadline for a finite, non-interactive job. Use short relative polls for REPLs, dev servers, and other ongoing or interactive work.
 - Esc cancels the wait without killing the child. An empty poll keeps its buffered output available for the next call.
 - A human steer (including RPC `steer`) returns early with `wait_status: interrupted_by_steer`, drains output so far, and leaves the child alive. Nested Codemode calls throw while a steer is queued so a script can stop polling. Follow-ups and extension-generated steers do not trigger this behavior.
 - `wall_time` is the current call's elapsed time; `total_time` on `write_stdin` covers the session from launch through the current result or exit. Scripts get numeric seconds in `details.wall_time_seconds` and `details.total_time_seconds`. Formatted replies show `wait_status` only for cancellation and steering. Normal completion and deadline outcomes are available in `details`.

@@ -8,7 +8,6 @@
 import { Type, type Static } from "typebox";
 
 import type { OnExitPolicy } from "./completion.ts";
-import { MIN_LOG_BYTES, OUTPUT_LOG_PATH_TEMPLATE } from "./output-log.ts";
 import { type KillResultDetails, type ProcessResultDetails, renderProcessResultText, safeMeta } from "./tool-result.ts";
 
 const optionalMeta = (value: string | undefined): string | undefined => (value ? safeMeta(value) : undefined);
@@ -21,7 +20,7 @@ function compact<T extends Record<string, unknown>>(value: T): T {
 
 const logSchema = Type.Optional(Type.Integer({
 	minimum: 1,
-	description: `Log sequence number; present at ${MIN_LOG_BYTES} cumulative output bytes. Read ${OUTPUT_LOG_PATH_TEMPLATE} under Pi's cwd.`,
+	description: "Log sequence number.",
 }));
 
 const outputFields = {
