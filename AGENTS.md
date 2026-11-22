@@ -2,12 +2,8 @@
 
 Whenever you edit code, docs, tests, or package metadata, update `Changelog.md` in the same change.
 
-Before changing long-wait/wake behavior, read `docs/IV-0001-long-wait-and-wake-control.md`. Before changing result bounds, logs, truncation, or TUI tool rendering, read `docs/IV-0002-output-lifecycle-and-rendering.md`.
-
-On Pi upgrades, also requalify `src/codemode-render.ts`: public native factory,
-schema identity/MCP activation, default inactivity, mode/budget/loadout,
-store/model helpers, and cached `lastComponent` unwrapping. Run the codemode
-unit/CLI tests and `bun run test:tui`; renderer fallback must not mask failures.
+- **Waits, steering, or wakes:** read [Waits and wakes](docs/DEV.md#waits-and-wakes).
+- **Result bounds, logs, tool rendering, or Pi upgrades:** read [Output and rendering](docs/DEV.md#output-and-rendering). On Pi upgrades, run the Codemode unit/CLI tests and `bun run test:tui`; generic renderer fallback fails qualification.
 
 Canonical verification:
 
@@ -15,9 +11,7 @@ Canonical verification:
 bun run test
 ```
 
-If you want to inspect pi-mono's source code, git clone https://github.com/earendil-works/pi (formerly badlogic/pi-mono; old URL redirects) to ./local_data/pi-mono
-
-./local_data is added in .gitignore.
+For Pi source inspection, clone [earendil-works/pi](https://github.com/earendil-works/pi) into the ignored `local_data/pi-mono` directory.
 
 ## Frontier Models
 

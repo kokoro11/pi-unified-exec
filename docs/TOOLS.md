@@ -1,0 +1,75 @@
+# Tool reference
+
+For installation and a first run, see [the README](../README.md).
+
+## `exec_command`
+
+Starts a process and waits for an initial result. A process that finishes during this call reports `[exited ok]` or `[exited error CODE]`. A reply starting with `[running #N]` gives you the session ID for later calls.
+
+| Parameter | Default | Use |
+| --- | --- | --- |
+| `cmd` | Required | Shell command to run. |
+| `workdir` | Pi's working directory | Working directory for the child. |
+| `shell` | Bash; PowerShell fallback on Windows | Shell executable. Windows also supports explicit `cmd`, `powershell`, or `pwsh`. |
+| `tty` | `false` | Set to `true` for a terminal. Use pipes for programs that only need stdin and output. |
+| `cols`, `rows` | `120`, `30` | Initial terminal size; clamped to 20–500 columns and 5–300 rows. Ignored in pipe mode. |
+| `yield_time_ms` | `10000` | How long the call stays attached; clamped to 250–30,000 ms. |
+| `on_exit` | `"none"` | Use `"wake"` only when the human requests automatic resumption after an unobserved exit. |
+
+## `write_stdin`
+
+Takes a `session_id` from `exec_command`. Omit input to poll, or send input before collecting more output. A terminal result keeps the ID, for example `[exited #4 error 2]`. Continue polling only while `details.running` is true or the header says `[running #N]`.
+
+| Parameter | Default | Use |
+| --- | --- | --- |
+| `chars` | Empty | Text and C-style escapes, written as UTF-8. |
+| `chars_b64` | Empty | Base64 for exact bytes. Use it instead of `chars`; malformed base64 is rejected. |
+| `yield_time_ms` | `250` with input; `5000` for an empty poll | With input, clamped to 250–30,000 ms. For an empty poll the minimum is 5000 ms and there is no built-in maximum. Supply a finite non-negative duration within `Number.MAX_SAFE_INTEGER`; fractions round down. |
+| `yield_until` | Unset | Absolute deadline for an empty poll. Supply a UTC date and time ending in `Z`, with seconds and optional milliseconds. Omit `yield_time_ms`. A past deadline polls immediately; validation errors include `current_utc_time`. |
+
+### Waiting and cancellation
+
+- A yield or deadline ends the current wait and leaves the process running. Choose a finite relative duration that fits the job. Use `yield_until` only when the human requests a long attached wait or a UTC deadline for a finite, non-interactive job. Use short relative polls for REPLs, dev servers, and other ongoing or interactive work.
+- Esc cancels the wait without killing the child. An empty poll keeps its buffered output available for the next call.
+- A human steer (including RPC `steer`) returns early with `wait_status: interrupted_by_steer`, drains output so far, and leaves the child alive. Nested Codemode calls throw while a steer is queued so a script can stop polling. Follow-ups and extension-generated steers do not trigger this behavior.
+- `wall_time` is the current call's elapsed time; `total_time` on `write_stdin` covers the session from launch through the current result or exit. Scripts get numeric seconds in `details.wall_time_seconds` and `details.total_time_seconds`. Formatted replies show `wait_status` only for cancellation and steering. Normal completion and deadline outcomes are available in `details`.
+
+### Sending input
+
+In `chars`, use `\n` for a pipe's newline, `\r` for Enter in a terminal (including Windows), and `\x03` for Ctrl-C in a terminal. In pipe mode Ctrl-C is just a byte. Other supported escapes include tabs and control characters (`\t`, `\b`, `\f`, `\v`, `\0`, `\a`, `\e`), Unicode (`\uHHHH`, `\u{H…H}`), hex (`\xHH`), and escaped quotes (`\"`, `\'`). Unknown escapes stay literal. Use `\\` for a literal backslash and `chars_b64` for arbitrary binary, including bytes above `0x7F`.
+
+## Session management
+
+| Tool | Parameters | Result |
+| --- | --- | --- |
+| `set_on_exit` | `session_id`, `on_exit` (`"none"` or `"wake"`) | Disarm a pending wake without killing the process, or arm a live session. An unknown ID returns `found: false`. |
+| `kill_session` | `session_id`, optional `signal` (default `SIGTERM`) | Suppress a pending wake and stop the child. On POSIX, escalate to `SIGKILL` after two seconds as needed. On Windows, force-kill the process tree. An unconfirmed kill leaves the session registered. |
+| `list_sessions` | None | Include `session_id`, `running`, `wake_armed`, and `log` when available. Report each unobserved exit once, then remove it from the list. |
+
+A wake sends a follow-up with exit metadata and a log number when available. Any successful tool result that observes the completion consumes the pending wake. A deadline, steer, or cancellation keeps it armed. Use `set_on_exit` with `"none"` when you no longer want a wake; a follow-up already queued to Pi stays queued.
+
+## Output and logs
+
+Process and kill results show up to 50 KiB or 2,000 lines of terminal-safe text. More than 1 MiB of output between drains can also leave a gap in the in-memory buffer. Expand a collapsed result with Pi's `app.tools.expand` binding (Ctrl+O by default) to see the full **bounded** result.
+
+At 512 cumulative raw bytes, the extension starts archiving the full stream, including the initial bytes. A result like `log: 4` points to `.temp/pi-unified-exec/4.log` under **Pi's starting directory**, even if the command uses another `workdir`. Smaller output stays inline. Raw logs can contain terminal control sequences; open them with a plain-text reader or hex viewer.
+
+## Codemode
+
+`exec_command` and `write_stdin` return `{ details, text }` inside Codemode. Read fields such as `details.running`, `details.session_id`, and `details.exit_code` for control flow. `details.output` is the bounded text; `text(r.text)` prints the formatted reply with line breaks.
+
+```js
+const r = await tools.exec_command({ cmd: "git status --short" });
+text(r.text);
+```
+
+`kill_session`, `list_sessions`, and `set_on_exit` return typed fields directly. See the [result schemas](../src/script-result.ts). The extension caps collapsed Codemode text at ten visual rows across nested tools without enabling Codemode or changing script results or expanded output.
+
+## Configuration
+
+| Environment variable | Effect |
+| --- | --- |
+| `PI_UNIFIED_EXEC_BASH` | Override Git Bash discovery on Windows. The default searches PATH and common Git installations before falling back to PowerShell. |
+| `PI_UNIFIED_EXEC_MAX_EMPTY_POLL_MS` | Limit empty relative polls. Unset or blank means no cap. Values must be positive, finite, and within `Number.MAX_SAFE_INTEGER`; fractions round down and values below 5000 become 5000. Polls above the cap fail. Absolute deadlines are unaffected. |
+| `PI_UNIFIED_EXEC_STEER_INTERRUPT=0` | Leave waits attached when a human steers. |
+| `PI_UNIFIED_EXEC_COMPACT_CODEMODE=0` | Use the native Codemode rendering. |
