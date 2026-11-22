@@ -3,18 +3,9 @@
 [![CI](https://github.com/kokoro11/pi-unified-exec/actions/workflows/ci.yml/badge.svg)](https://github.com/kokoro11/pi-unified-exec/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A [Pi](https://pi.dev/) extension for running shell commands in reusable sessions. Pi can start a dev server, drive a REPL, or check on a build across turns. Use Pi's built-in `bash` for one-shot commands that don't need later input or polling.
+A [Pi](https://pi.dev/) extension for running shell commands in reusable sessions. Use it to start dev servers, drive REPLs, and check on builds across turns.
 
-## Quick start
-
-Once loaded, paste this into Pi:
-
-```text
-Use exec_command with a 250 ms yield to run: echo ready; sleep 3; echo done
-Then poll the returned session with write_stdin and show me the final output.
-```
-
-The first call yields `[running #N]`. Pi uses `N` as the `session_id` for `write_stdin`, which returns `[exited #N ok]` when the job ends. To stop a live process yourself, use `/unified-exec-sessions` in Pi.
+The extension replaces Pi's built-in `bash` tool by default. Use `exec_command` for both one-shot commands and long-running processes.
 
 ## Install
 
@@ -26,7 +17,18 @@ pi install git:github.com/kokoro11/pi-unified-exec
 
 Add `-l` for a project-local install, or try it for one invocation with `pi -e git:github.com/kokoro11/pi-unified-exec`. Use `/reload` if Pi is already running. If you have the previous npm version configured, remove that package in the same scope before installing the GitHub version to avoid loading both.
 
-Pi installs the native PTY dependency. On Windows, Git Bash is recommended; PowerShell is the fallback if Bash is unavailable. Use `--keep-builtin-bash` to keep Pi's built-in `bash` active alongside this extension.
+Pi installs the native PTY dependency. On Windows, Git Bash is recommended; PowerShell is the fallback if Bash is unavailable.
+
+## Quick start
+
+After installing, paste this prompt into Pi:
+
+```text
+Use exec_command with a 250 ms yield to run: echo ready; sleep 3; echo done
+Then poll the returned session with write_stdin and show me the final output.
+```
+
+The extension's `exec_command` returns `[running #N]` for the live session. Pass `N` as `session_id` to `write_stdin`, which returns `[exited #N ok]` on successful completion. To stop a live process yourself, run `/unified-exec-sessions`.
 
 ## Tools
 

@@ -67,6 +67,8 @@ text(r.text);
 
 ## Configuration
 
+The `--keep-builtin-bash` flag opts out of replacing Pi's built-in `bash` tool.
+
 | Environment variable | Effect |
 | --- | --- |
 | `PI_UNIFIED_EXEC_BASH` | Override Git Bash discovery on Windows. The default searches PATH and common Git installations before falling back to PowerShell. |

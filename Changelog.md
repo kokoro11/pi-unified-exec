@@ -4,6 +4,7 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Put installation before the README quick start and clarify that the extension's `exec_command` replaces Pi's built-in `bash` tool by default.
 - Show log numbers as `log=N` in terminal preview footers and expanded session lists. Tool replies and structured fields are unchanged.
 - Move package distribution and repository links to `kokoro11/pi-unified-exec` on GitHub. Disable npm publication and retire the upstream interaction-limit reminder.
 - Shorten the README, move parameters and scripting into the [tool reference](docs/TOOLS.md), and consolidate current maintainer guidance in [Development](docs/DEV.md). Retire the old compatibility audit and workspace documents.
