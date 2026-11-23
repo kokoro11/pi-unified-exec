@@ -32,7 +32,8 @@ Pi puts `promptGuidelines` entries in the shared Rules section without adding th
 
 | Concern | Start here |
 | --- | --- |
-| Tool schemas, lifecycle hooks, and session picker | [`src/index.ts`](../src/index.ts) |
+| Tool schemas and lifecycle hooks | [`src/index.ts`](../src/index.ts) |
+| Session status, widget, and picker | [`src/session-ui.ts`](../src/session-ui.ts) |
 | Process, buffers, and eviction | [`src/session.ts`](../src/session.ts), [`src/session-store.ts`](../src/session-store.ts), [`src/head-tail-buffer.ts`](../src/head-tail-buffer.ts) |
 | Shell selection, native terminals, and input decoding | [`src/shell.ts`](../src/shell.ts), [`src/pty.ts`](../src/pty.ts), [`src/unescape.ts`](../src/unescape.ts) |
 | Windows process ownership | [`src/windows-job.ts`](../src/windows-job.ts), [`src/windows-launcher.js`](../src/windows-launcher.js) |

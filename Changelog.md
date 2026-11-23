@@ -4,6 +4,8 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Keep session status, the widget, and the picker together and share their formatting of running sessions.
+- Use the recorded exit time for session state and duration, and reuse the tracked byte count when snapshotting live output.
 - Share result assembly across command launches, input writes, polls, and kills while keeping tool replies and wake behavior unchanged.
 - Simplify session eviction to scan only the unprotected entries, still preferring the oldest exited session.
 - Clarify session IDs, polling, and kill outcomes in the tool descriptions.

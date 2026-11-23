@@ -14,6 +14,7 @@ import { describe, it } from "bun:test";
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
 import { MAX_EMPTY_POLL_ENV_VAR } from "../src/time.ts";
 import { OUTPUT_LOG_DIRECTORY } from "../src/output-log.ts";
+import { DEFAULT_STREAM_TAIL_BYTES } from "../src/session.ts";
 import { IS_WINDOWS } from "../src/shell.ts";
 import { activateProcessTools } from "./fixtures/process-tools.ts";
 
@@ -1077,12 +1078,38 @@ describe("unified-exec e2e", () => {
 		await h.emit("session_shutdown");
 	});
 
+	it("onUpdate keeps only the latest bytes of noisy output", async () => {
+		const h = makeHarness();
+		await h.emit("session_start");
+		try {
+			const ac = new AbortController();
+			let tail: string | undefined;
+			await h.call(
+				"exec_command",
+				{ cmd: `printf 'prefix%0${DEFAULT_STREAM_TAIL_BYTES * 2}dEND' 0; sleep 30` },
+				ac.signal,
+				(partial) => {
+					if (!partial.details.output.endsWith("END")) return;
+					tail = partial.details.output;
+					ac.abort();
+				},
+			);
+			assert.equal(tail, `${"0".repeat(DEFAULT_STREAM_TAIL_BYTES - 3)}END`);
+		} finally {
+			await h.emit("session_shutdown");
+		}
+	});
+
 	it("/unified-exec-sessions command kills a selected session", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
 		const r1 = await h.call("exec_command", { cmd: "sleep 30", yield_time_ms: 250 });
 		const sid = r1.details.session_id;
 		assert.ok(typeof sid === "number");
+
+		await h.invokeCommand("unified-exec-sessions");
+		const beforeKill = await h.call("list_sessions", {});
+		assert.equal(beforeKill.details.active_count, 1, "cancelling the picker leaves the session running");
 
 		h.uiEvents.selectResponses.push((options) => options.find((o) => o.startsWith(`#${sid} `)));
 		await h.invokeCommand("unified-exec-sessions");

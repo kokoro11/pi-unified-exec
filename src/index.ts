@@ -22,12 +22,12 @@
  */
 
 import { constants as osConstants } from "node:os";
-import { type AgentToolResult, type AgentToolUpdateCallback, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { type AgentToolResult, type AgentToolUpdateCallback, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, type TUnsafe } from "typebox";
 
 import type { CollectResult } from "./collect.ts";
 import { registerCompactCodemode } from "./codemode-render.ts";
-import { CompletionCoordinator, type OnExitPolicy, type OnExitStatus, sanitizeMeta } from "./completion.ts";
+import { CompletionCoordinator, type OnExitPolicy, type OnExitStatus } from "./completion.ts";
 import { formatElapsed } from "./format-time.ts";
 import { type LongWaitOutcome, startRateLimitedStream, waitForExitOrDeadline } from "./long-wait.ts";
 import { sleep } from "./notify.ts";
@@ -56,6 +56,7 @@ import {
 } from "./script-result.ts";
 import { ExecSession } from "./session.ts";
 import { SessionStore } from "./session-store.ts";
+import { SessionUi, formatSessionCommand, formatSessionCount } from "./session-ui.ts";
 import {
 	isNestedToolCall,
 	type PendingProbe,
@@ -95,7 +96,6 @@ const MIN_PTY_ROWS = 5;
 const MAX_PTY_ROWS = 300;
 // Long empty polls use output-driven updates, never a periodic heartbeat.
 const LONG_WAIT_UPDATE_INTERVAL_MS = 30_000;
-const SESSION_UI_KEY = "unified-exec.sessions";
 
 /**
  * Google-compatible string enum schema (plain `type: "string"` + `enum`,
@@ -151,9 +151,7 @@ interface ExtensionCtx {
 	store: SessionStore;
 	/** Agent-level wake scheduling for on_exit: "wake" (see completion.ts). */
 	coordinator: CompletionCoordinator;
-	ui: ExtensionContext["ui"] | undefined;
-	widgetVisible: boolean;
-	exitUnsubscribers: Map<number, () => void>;
+	sessionUi: SessionUi;
 	warnedShellFallback: boolean;
 	notifiedBashSource: boolean;
 	/**
@@ -255,7 +253,7 @@ async function runExecCommand(
 		shellBin = resolved.shell;
 		if (resolved.fellBack && !ctx.warnedShellFallback) {
 			ctx.warnedShellFallback = true;
-			ctx.ui?.notify(
+			ctx.sessionUi.ui?.notify(
 				"unified-exec: no bash found (PATH, git-derived, or known install roots); falling back to powershell. Install Git Bash or set PI_UNIFIED_EXEC_BASH.",
 				"warning",
 			);
@@ -269,7 +267,7 @@ async function runExecCommand(
 			// bash located off PATH (derived from git.exe or a known install
 			// root) — say so once, so shell selection is never mysterious.
 			ctx.notifiedBashSource = true;
-			ctx.ui?.notify(`unified-exec: using bash at ${resolved.shell} (not on PATH)`, "info");
+			ctx.sessionUi.ui?.notify(`unified-exec: using bash at ${resolved.shell} (not on PATH)`, "info");
 		}
 	} else if (IS_WINDOWS) {
 		// Resolve bare names to the absolute PATH match, failing closed —
@@ -293,7 +291,6 @@ async function runExecCommand(
 		cols: args.cols !== undefined ? clamp(Math.floor(args.cols), MIN_PTY_COLS, MAX_PTY_COLS) : undefined,
 		rows: args.rows !== undefined ? clamp(Math.floor(args.rows), MIN_PTY_ROWS, MAX_PTY_ROWS) : undefined,
 		displayCommand: args.cmd,
-		shell: shellBin,
 		windowsVerbatimArguments: shellCommand.windowsVerbatimArguments,
 	});
 
@@ -349,16 +346,16 @@ async function runExecCommand(
 		// Live session: register it BEFORE we keep polling, so an early abort
 		// doesn't let the session be GC'd / lose its place.
 		const { pruned, count } = ctx.store.insert(session);
-		watchSessionExit(ctx, session);
+		ctx.sessionUi.watchExit(session);
 		if (pruned) {
-			unwatchSessionExit(ctx, pruned.id);
+			ctx.sessionUi.unwatchExit(pruned.id);
 			// Suppresses the wake for live victims; keeps a tombstone for a
 			// naturally-exited wake session so its completion is not silently lost.
 			ctx.coordinator.handleEviction(pruned);
-			ctx.ui?.notify(`unified-exec: evicted session ${pruned.id} (LRU, over cap ${ctx.store.maxSessions})`, "warning");
+			ctx.sessionUi.ui?.notify(`unified-exec: evicted session ${pruned.id} (LRU, over cap ${ctx.store.maxSessions})`, "warning");
 		}
 		if (count >= WARNING_SESSIONS) {
-			ctx.ui?.notify(`unified-exec: ${count}/${ctx.store.maxSessions} sessions open`, "warning");
+			ctx.sessionUi.ui?.notify(`unified-exec: ${count}/${ctx.store.maxSessions} sessions open`, "warning");
 		}
 		// Note: sessions stay in the store until a later tool call observes the
 		// exit: write_stdin returns the final exit_code/output, and list_sessions
@@ -646,94 +643,9 @@ async function terminateSessionById(
 	return { session, escalated, collected, killed, onExit: ctx.coordinator.onExitStatus(session) };
 }
 
-function runningSessions(ctx: ExtensionCtx): ExecSession[] {
-	return ctx.store
-		.values()
-		.filter((s) => !s.hasExited)
-		.sort((a, b) => a.id - b.id);
-}
-
-function plural(n: number, singular: string, pluralForm = `${singular}s`): string {
-	return n === 1 ? singular : pluralForm;
-}
-
-function oneLineCommand(command: string, max = 120): string {
-	// sanitizeMeta strips control chars (ESC included) — \s+ alone would let
-	// terminal escape sequences through to widgets and pickers.
-	const oneLine = sanitizeMeta(command).replace(/\s+/g, " ").trim();
-	return oneLine.length <= max ? oneLine : `${oneLine.slice(0, max - 1)}…`;
-}
-
-function formatRunningSessionsWidget(ctx: ExtensionCtx, sessions: ExecSession[]): string[] {
-	const now = Date.now();
-	const shown = sessions.slice(0, 5);
-	const lines = [
-		`⚠ unified-exec: ${sessions.length} ${plural(sessions.length, "session")} still running`,
-		...shown.map((s) => {
-			const wake = ctx.coordinator.isArmed(s.id) ? " [wake]" : "";
-			const held = s.shellExited ? " (shell exited, pipe held)" : "";
-			return `  #${s.id} ${formatElapsed(now - s.startedAt)}${wake}${held} ${oneLineCommand(s.displayCommand, 72)} (${s.cwd})`;
-		}),
-	];
-	if (sessions.length > shown.length) lines.push(`  … ${sessions.length - shown.length} more; use list_sessions`);
-	lines.push("  Use list_sessions, write_stdin (on_exit to change wake), or kill_session.");
-	return lines;
-}
-
-function updateRunningSessionsUi(ctx: ExtensionCtx, opts: { showWidget?: boolean; notifyTree?: boolean } = {}): void {
-	const ui = ctx.ui;
-	if (!ui) return;
-	const sessions = runningSessions(ctx);
-	const status = sessions.length ? `unified-exec: ${sessions.length} ${plural(sessions.length, "session")} running` : undefined;
-	ui.setStatus(SESSION_UI_KEY, status);
-
-	if (opts.notifyTree && sessions.length > 0) {
-		ui.notify(
-			`unified-exec: ${sessions.length} ${plural(sessions.length, "session")} still running after /tree.`,
-			"warning",
-		);
-	}
-
-	if (sessions.length === 0) {
-		if (ctx.widgetVisible) {
-			ui.setWidget(SESSION_UI_KEY, undefined);
-			ctx.widgetVisible = false;
-		}
-		return;
-	}
-
-	if (opts.showWidget || ctx.widgetVisible) {
-		ui.setWidget(SESSION_UI_KEY, formatRunningSessionsWidget(ctx, sessions), { placement: "aboveEditor" });
-		ctx.widgetVisible = true;
-	}
-}
-
-function watchSessionExit(ctx: ExtensionCtx, session: ExecSession): void {
-	ctx.exitUnsubscribers.get(session.id)?.();
-	const unsubscribe = session.onExit(() => {
-		// Preserve lazy-drain semantics: an exited session stays in the store until
-		// write_stdin/list_sessions/kill_session observes it. The UI only reflects
-		// currently running processes.
-		updateRunningSessionsUi(ctx);
-	});
-	ctx.exitUnsubscribers.set(session.id, unsubscribe);
-}
-
-function unwatchSessionExit(ctx: ExtensionCtx, id: number): void {
-	ctx.exitUnsubscribers.get(id)?.();
-	ctx.exitUnsubscribers.delete(id);
-}
-
-function removeSession(ctx: ExtensionCtx, id: number): ExecSession | undefined {
-	unwatchSessionExit(ctx, id);
-	return ctx.store.remove(id);
-}
-
-function clearSessionExitWatchers(ctx: ExtensionCtx): void {
-	for (const unsubscribe of ctx.exitUnsubscribers.values()) {
-		unsubscribe();
-	}
-	ctx.exitUnsubscribers.clear();
+function removeSession(ctx: ExtensionCtx, id: number): void {
+	ctx.sessionUi.unwatchExit(id);
+	ctx.store.remove(id);
 }
 
 /** Shared streaming-update payload for attached waits. */
@@ -806,6 +718,7 @@ function startStreaming(
 }
 
 export default function (pi: ExtensionAPI) {
+	const store = new SessionStore({ maxSessions: MAX_SESSIONS, lruProtectedCount: LRU_PROTECTED_COUNT });
 	const coordinator = new CompletionCoordinator({
 		send: (message) => {
 			// If pi is idle this starts a model turn; if a run is active it is
@@ -821,7 +734,7 @@ export default function (pi: ExtensionAPI) {
 			);
 		},
 		onSendError: (err) => {
-			ctx.ui?.notify(
+			ctx.sessionUi.ui?.notify(
 				`unified-exec: failed to deliver completion notification: ${err instanceof Error ? err.message : String(err)}`,
 				"warning",
 			);
@@ -829,12 +742,8 @@ export default function (pi: ExtensionAPI) {
 	});
 	const ctx: ExtensionCtx = {
 		coordinator,
-		// Eviction UI (status clear + warning) is handled at the insert site;
-		// no onEvict callback needed.
-		store: new SessionStore({ maxSessions: MAX_SESSIONS, lruProtectedCount: LRU_PROTECTED_COUNT }),
-		ui: undefined,
-		widgetVisible: false,
-		exitUnsubscribers: new Map(),
+		store,
+		sessionUi: new SessionUi(store, coordinator),
 		warnedShellFallback: false,
 		notifiedBashSource: false,
 		pendingSessions: new Set(),
@@ -871,11 +780,11 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", async (_event, eventCtx) => {
-		ctx.ui = eventCtx.ui;
+		ctx.sessionUi.ui = eventCtx.ui;
 		ctx.shuttingDown = false; // reload/new/resume re-arms the extension
 		ctx.steer.reset();
 		ctx.coordinator.reset(); // never resurrect wakes from a previous session
-		updateRunningSessionsUi(ctx);
+		ctx.sessionUi.refresh();
 		// Default behavior is to remove the built-in `bash` tool. Only keep it
 		// if --keep-builtin-bash was passed. Flag lookup uses the registered
 		// name without leading dashes.
@@ -897,8 +806,8 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_tree", async (_event, eventCtx) => {
-		ctx.ui = eventCtx.ui;
-		updateRunningSessionsUi(ctx, { showWidget: true, notifyTree: runningSessions(ctx).length > 0 });
+		ctx.sessionUi.ui = eventCtx.ui;
+		ctx.sessionUi.refresh("tree");
 	});
 
 	pi.on("session_shutdown", async () => {
@@ -913,12 +822,12 @@ export default function (pi: ExtensionAPI) {
 		const drained = ctx.store.terminateAll();
 		for (const s of ctx.pendingSessions) {
 			if (!s.hasExited) {
-				s.terminate();
+				s.kill();
 				drained.push(s);
 			}
 		}
-		clearSessionExitWatchers(ctx);
-		updateRunningSessionsUi(ctx);
+		ctx.sessionUi.clearExitWatches();
+		ctx.sessionUi.refresh();
 		// Children run detached (own process groups), so anything that ignores
 		// SIGTERM would outlive pi as an orphan. Give them a short grace, then
 		// SIGKILL survivors and wait briefly for confirmation. On Windows the
@@ -931,9 +840,9 @@ export default function (pi: ExtensionAPI) {
 			for (const s of survivors) s.kill("SIGKILL");
 			await Promise.all(survivors.map((s) => waitForExitOrDeadline({ exited: s.exited, durationMs: 500 })));
 		}
-		if (drained.length && ctx.ui) {
+		if (drained.length && ctx.sessionUi.ui) {
 			const leftover = drained.filter((s) => !s.hasExited).length;
-			ctx.ui.notify(
+			ctx.sessionUi.ui.notify(
 				`unified-exec: terminated ${drained.length - leftover} live session(s) on shutdown` +
 					(leftover ? `; ${leftover} did not confirm exit` : ""),
 				 leftover ? "warning" : "info",
@@ -946,30 +855,13 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("unified-exec-sessions", {
 		description: "List live unified-exec sessions and optionally kill one (or all)",
 		handler: async (_args, cmdCtx) => {
-			ctx.ui = cmdCtx.ui;
+			ctx.sessionUi.ui = cmdCtx.ui;
 			// Reap silently-exited sessions first so the picker only shows live ones.
 			for (const s of ctx.store.values()) {
 				if (s.hasExited) removeSession(ctx, s.id);
 			}
-			updateRunningSessionsUi(ctx);
-			const sessions = runningSessions(ctx);
-			if (sessions.length === 0) {
-				cmdCtx.ui.notify("unified-exec: no live sessions", "info");
-				return;
-			}
-			const now = Date.now();
-			const labels = sessions.map((s) => {
-				const wake = ctx.coordinator.isArmed(s.id) ? " [wake]" : "";
-				const held = s.shellExited ? " (shell exited, pipe held)" : "";
-				return `#${s.id} ${formatElapsed(now - s.startedAt)}${wake}${held} ${oneLineCommand(s.displayCommand, 60)}`;
-			});
-			const KILL_ALL = `Kill all ${sessions.length} ${plural(sessions.length, "session")}`;
-			const choice = await cmdCtx.ui.select(
-				`unified-exec: ${sessions.length} live ${plural(sessions.length, "session")} — select to kill (Esc to cancel)`,
-				[...labels, KILL_ALL],
-			);
-			if (!choice) return;
-			const targets = choice === KILL_ALL ? sessions : sessions.filter((s) => choice.startsWith(`#${s.id} `));
+			const targets = await ctx.sessionUi.pickKillTargets(cmdCtx.ui);
+			if (!targets) return;
 			let killed = 0;
 			let failed = 0;
 			for (const s of targets) {
@@ -977,9 +869,9 @@ export default function (pi: ExtensionAPI) {
 				if (outcome?.killed) killed++;
 				else if (outcome) failed++;
 			}
-			updateRunningSessionsUi(ctx);
+			ctx.sessionUi.refresh();
 			cmdCtx.ui.notify(
-				`unified-exec: killed ${killed} ${plural(killed, "session")}` +
+				`unified-exec: killed ${formatSessionCount(killed)}` +
 					(failed ? `; ${failed} did not confirm exit (still listed)` : ""),
 				failed ? "warning" : "info",
 			);
@@ -1033,10 +925,10 @@ export default function (pi: ExtensionAPI) {
 			),
 		}),
 		async execute(toolCallId, params, signal, onUpdate, eventCtx) {
-			ctx.ui ??= eventCtx.ui;
+			ctx.sessionUi.ui ??= eventCtx.ui;
 			const steerSignal = steerSignalFor(ctx, toolCallId, eventCtx);
 			const shape = await runExecCommand(ctx, params, signal, steerSignal, onUpdate, eventCtx.cwd);
-			updateRunningSessionsUi(ctx);
+			ctx.sessionUi.refresh();
 			return textToolResult(shape, execCommandScriptResult(shape));
 		},
 		renderCall: renderExecCommandCall,
@@ -1082,10 +974,10 @@ export default function (pi: ExtensionAPI) {
 			)),
 		}),
 		async execute(toolCallId, params, signal, onUpdate, eventCtx) {
-			ctx.ui ??= eventCtx.ui;
+			ctx.sessionUi.ui ??= eventCtx.ui;
 			const steerSignal = steerSignalFor(ctx, toolCallId, eventCtx);
 			const shape = await runWriteStdin(ctx, params, signal, steerSignal, onUpdate, toolCallId);
-			updateRunningSessionsUi(ctx);
+			ctx.sessionUi.refresh();
 			return textToolResult(shape, writeStdinScriptResult(shape));
 		},
 		renderCall: renderWriteStdinCall,
@@ -1106,7 +998,7 @@ export default function (pi: ExtensionAPI) {
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, eventCtx) {
-			ctx.ui ??= eventCtx.ui;
+			ctx.sessionUi.ui ??= eventCtx.ui;
 			const sid = (params as { session_id: number; signal?: string }).session_id;
 			const initial = normalizeSignal((params as { signal?: string }).signal);
 			const startedAt = Date.now();
@@ -1121,7 +1013,7 @@ export default function (pi: ExtensionAPI) {
 				} as const, killNotFoundScriptResult(sid));
 			}
 			const { session, escalated, collected, killed, onExit } = outcome;
-			updateRunningSessionsUi(ctx);
+			ctx.sessionUi.refresh();
 			const killFailure = killed
 				? session.failureMessage
 				: [
@@ -1164,7 +1056,7 @@ export default function (pi: ExtensionAPI) {
 		outputSchema: listSessionsScriptResultSchema,
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, eventCtx) {
-			ctx.ui ??= eventCtx.ui;
+			ctx.sessionUi.ui ??= eventCtx.ui;
 			// Reap any sessions that have exited silently (e.g., completed between
 			// tool calls without anyone observing them) — but report each of them
 			// one final time with exit info instead of dropping them on the floor.
@@ -1201,7 +1093,7 @@ export default function (pi: ExtensionAPI) {
 						log: s.log,
 					};
 				});
-			updateRunningSessionsUi(ctx);
+			ctx.sessionUi.refresh();
 			const active = sessions.length - justExited;
 			const lines = sessions.length
 				? sessions.map((s) => {
@@ -1211,7 +1103,7 @@ export default function (pi: ExtensionAPI) {
 						const wake = s.on_exit ? `\n        on_exit: ${s.on_exit}` : "";
 						return `  ${String(s.session_id).padStart(3)}  pid=${String(s.pid ?? "?").padStart(6)}  ${
 							s.tty ? "tty" : "pipe"
-						}  ${formatElapsed(s.elapsed_ms).padStart(8)}  ${oneLineCommand(s.command, 60)}${exitedSuffix}${wake}${s.log ? `\n        log: ${s.log}` : ""}`;
+						}  ${formatElapsed(s.elapsed_ms).padStart(8)}  ${formatSessionCommand(s.command, 60)}${exitedSuffix}${wake}${s.log ? `\n        log: ${s.log}` : ""}`;
 					})
 				: ["  (no live sessions)"];
 			const header = justExited

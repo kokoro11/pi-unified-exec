@@ -13,7 +13,7 @@ import { type CollectResult, collectOutputUntilDeadline } from "./collect.ts";
 import { HeadTailBuffer } from "./head-tail-buffer.ts";
 import { Gate, Notify } from "./notify.ts";
 import { OutputLog } from "./output-log.ts";
-import { type SpawnedChild, spawnChild } from "./pty.ts";
+import { type SpawnedChild, type SpawnOptions, spawnChild } from "./pty.ts";
 
 /** Default per-session output retention. */
 export const DEFAULT_HEAD_TAIL_MAX_BYTES = 1024 * 1024; // 1 MiB
@@ -21,31 +21,15 @@ export const DEFAULT_HEAD_TAIL_MAX_BYTES = 1024 * 1024; // 1 MiB
 /** Default rolling tail window used for TUI streaming (independent of the head+tail buffer). */
 export const DEFAULT_STREAM_TAIL_BYTES = 32 * 1024; // 32 KiB
 
-export interface SessionSpawnOptions {
-	command: string[];
-	cwd: string;
-	env: NodeJS.ProcessEnv;
-	tty: boolean;
-	cols?: number;
-	rows?: number;
+export interface SessionSpawnOptions extends SpawnOptions {
 	headTailMaxBytes?: number;
 	streamTailBytes?: number;
 	displayCommand?: string; // human-readable command for list_sessions/UI
-	shell?: string; // raw `shell` arg recorded for introspection
-	windowsVerbatimArguments?: boolean; // Windows cmd.exe quoting (see shell.ts)
-}
-
-export interface SessionState {
-	hasExited: boolean;
-	exitCode: number | null;
-	signal: NodeJS.Signals | null;
-	failureMessage: string | null;
 }
 
 export class ExecSession {
 	readonly id: number;
 	readonly tty: boolean;
-	readonly command: string[];
 	readonly displayCommand: string;
 	readonly cwd: string;
 	readonly startedAt: number;
@@ -64,11 +48,11 @@ export class ExecSession {
 	}
 
 	/** Head+tail buffer drained by each collectOutputUntilDeadline() call. */
-	readonly outputBuffer: HeadTailBuffer;
+	private readonly outputBuffer: HeadTailBuffer;
 	/** Fired whenever new data arrives in outputBuffer. */
 	readonly outputNotify = new Notify();
 	/** Closed when the stream is done (all data flushed after exit). */
-	readonly outputClosed = new Gate();
+	private readonly outputClosed = new Gate();
 	/** Aborts when the process has exited (may still have trailing output). */
 	private readonly exitedAc = new AbortController();
 	get exited(): AbortSignal {
@@ -76,17 +60,14 @@ export class ExecSession {
 	}
 
 	/** Running tail window for TUI streaming; independent of outputBuffer. */
-	private streamTail: Uint8Array[] = [];
+	private readonly streamTail: Uint8Array[] = [];
 	private streamTailBytes = 0;
 	private readonly streamTailCap: number;
 	private totalOutputBytes = 0;
 
-	private state: SessionState = {
-		hasExited: false,
-		exitCode: null,
-		signal: null,
-		failureMessage: null,
-	};
+	private childExitCode: number | null = null;
+	private childSignal: NodeJS.Signals | null = null;
+	private failure: string | null = null;
 	private readonly exitListeners = new Set<(session: ExecSession) => void>();
 	private lastUsedAt: number;
 	private child!: SpawnedChild;
@@ -97,7 +78,6 @@ export class ExecSession {
 
 	private constructor(id: number, opts: SessionSpawnOptions) {
 		this.id = id;
-		this.command = opts.command;
 		this.displayCommand = opts.displayCommand ?? opts.command.join(" ");
 		this.cwd = opts.cwd;
 		this.tty = opts.tty;
@@ -105,25 +85,18 @@ export class ExecSession {
 		this.lastUsedAt = this.startedAt;
 		this.outputBuffer = new HeadTailBuffer(opts.headTailMaxBytes ?? DEFAULT_HEAD_TAIL_MAX_BYTES);
 		this.streamTailCap = opts.streamTailBytes ?? DEFAULT_STREAM_TAIL_BYTES;
-		this.outputLog = new OutputLog((message) => this.recordFailure(message));
+		this.outputLog = new OutputLog((message) => {
+			this.failure ??= message;
+		});
 	}
 
 	static spawn(id: number, opts: SessionSpawnOptions): ExecSession {
 		const self = new ExecSession(id, opts);
 
 		try {
-			self.child = spawnChild({
-				command: opts.command,
-				cwd: opts.cwd,
-				env: opts.env,
-				tty: opts.tty,
-				cols: opts.cols,
-				rows: opts.rows,
-				windowsVerbatimArguments: opts.windowsVerbatimArguments,
-			});
+			self.child = spawnChild(opts);
 		} catch (err: any) {
-			self.markFailure(err?.message ?? String(err));
-			self.exitedAc.abort();
+			self.recordExit(null, null, err?.message ?? String(err));
 			self.outputClosed.close();
 			return self;
 		}
@@ -137,15 +110,7 @@ export class ExecSession {
 		});
 
 		self.child.onExit((exitCode, signal, failureMessage) => {
-			self.endedAtMonotonic = performance.now();
-			self.state = {
-				hasExited: true,
-				exitCode,
-				signal,
-				failureMessage: self.state.failureMessage ?? failureMessage ?? null,
-			};
-			self.exitedAc.abort();
-			self.notifyExitListeners();
+			self.recordExit(exitCode, signal, failureMessage);
 			// Fire a notify so any parked waiters wake up and see the exit.
 			self.outputNotify.notifyAll();
 			// A short tick later, flush the log stream to disk, then close the
@@ -168,8 +133,10 @@ export class ExecSession {
 		// the trim loop below never shrinks a lone chunk, and shipping a
 		// multi-megabyte "tail" to the TUI every tick defeats the cap.
 		if (chunk.length >= this.streamTailCap) {
-			this.streamTail = [chunk.subarray(chunk.length - this.streamTailCap)];
-			this.streamTailBytes = this.streamTailCap;
+			const tail = chunk.subarray(chunk.length - this.streamTailCap);
+			this.streamTail[0] = tail;
+			this.streamTail.length = 1;
+			this.streamTailBytes = tail.length;
 			return;
 		}
 		this.streamTail.push(chunk);
@@ -181,38 +148,20 @@ export class ExecSession {
 				this.streamTailBytes -= front.length;
 			} else {
 				// Trim the front of the leading chunk just enough.
-				const drop = this.streamTailBytes - this.streamTailCap;
-				this.streamTail[0] = front.subarray(drop);
-				this.streamTailBytes -= drop;
+				const tail = front.subarray(this.streamTailBytes - this.streamTailCap);
+				this.streamTail[0] = tail;
+				this.streamTailBytes -= front.length - tail.length;
 				break;
 			}
 		}
 	}
 
-	/**
-	 * Record a non-fatal failure (e.g. log mirroring broke) WITHOUT marking the
-	 * session exited. The child keeps running and stays controllable.
-	 */
-	private recordFailure(message: string): void {
-		this.state = {
-			...this.state,
-			failureMessage: this.state.failureMessage ?? message,
-		};
-	}
-
-	/** Mark the session as failed-and-exited. Only for spawn-time failures. */
-	private markFailure(message: string): void {
+	private recordExit(exitCode: number | null, signal: NodeJS.Signals | null, failure?: string): void {
 		this.endedAtMonotonic = performance.now();
-		this.state = {
-			hasExited: true,
-			exitCode: this.state.exitCode,
-			signal: this.state.signal,
-			failureMessage: message,
-		};
-		this.notifyExitListeners();
-	}
-
-	private notifyExitListeners(): void {
+		this.childExitCode = exitCode;
+		this.childSignal = signal;
+		this.failure ??= failure ?? null;
+		this.exitedAc.abort();
 		for (const listener of this.exitListeners) {
 			try {
 				listener(this);
@@ -235,9 +184,7 @@ export class ExecSession {
 
 	/** Snapshot the current rolling tail (for streaming updates). */
 	snapshotStreamTail(): Uint8Array {
-		let total = 0;
-		for (const c of this.streamTail) total += c.length;
-		const out = new Uint8Array(total);
+		const out = new Uint8Array(this.streamTailBytes);
 		let offset = 0;
 		for (const c of this.streamTail) {
 			out.set(c, offset);
@@ -271,18 +218,18 @@ export class ExecSession {
 
 	/** Write bytes to stdin. Returns true on success, false if closed/dead. */
 	write(data: Uint8Array): boolean {
-		if (this.state.hasExited) return false;
+		if (this.hasExited) return false;
 		return this.child.write(data);
 	}
 
 	/** Send a signal. No-op if already exited. */
 	kill(signal: NodeJS.Signals = "SIGTERM"): void {
-		if (this.state.hasExited) return;
+		if (this.hasExited) return;
 		this.child.kill(signal);
 	}
 
 	get hasExited(): boolean {
-		return this.state.hasExited;
+		return this.endedAtMonotonic !== undefined;
 	}
 
 	/**
@@ -297,15 +244,15 @@ export class ExecSession {
 	}
 
 	get exitCode(): number | null {
-		return this.state.exitCode;
+		return this.childExitCode;
 	}
 
 	get signal(): NodeJS.Signals | null {
-		return this.state.signal;
+		return this.childSignal;
 	}
 
 	get failureMessage(): string | null {
-		return this.state.failureMessage;
+		return this.failure;
 	}
 
 	get totalBytesSeen(): number {
@@ -318,11 +265,5 @@ export class ExecSession {
 
 	touch(): void {
 		this.lastUsedAt = Date.now();
-	}
-
-	/** Terminate + mark closed. Used by session-store LRU eviction / shutdown. */
-	terminate(signal: NodeJS.Signals = "SIGTERM"): void {
-		this.kill(signal);
-		// onExit closes the output log; terminate() is idempotent.
 	}
 }

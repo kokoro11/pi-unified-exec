@@ -13,24 +13,20 @@
 
 import type { ExecSession } from "./session.ts";
 
-export interface SessionStoreOptions {
+interface SessionStoreOptions {
 	maxSessions: number;
 	lruProtectedCount: number;
-	/** Called when a session is evicted (for UI cleanup). */
-	onEvict?: (session: ExecSession, reason: "lru" | "shutdown") => void;
 }
 
 export class SessionStore {
 	private readonly sessions = new Map<number, ExecSession>();
 	private nextId = 1;
 	readonly maxSessions: number;
-	readonly lruProtectedCount: number;
-	private readonly onEvict: SessionStoreOptions["onEvict"];
+	private readonly lruProtectedCount: number;
 
 	constructor(opts: SessionStoreOptions) {
 		this.maxSessions = opts.maxSessions;
 		this.lruProtectedCount = opts.lruProtectedCount;
-		this.onEvict = opts.onEvict;
 	}
 
 	/** Allocate a new monotonic session id (never reused). */
@@ -44,6 +40,14 @@ export class SessionStore {
 
 	values(): ExecSession[] {
 		return Array.from(this.sessions.values());
+	}
+
+	running(): ExecSession[] {
+		const running: ExecSession[] = [];
+		for (const session of this.sessions.values()) {
+			if (!session.hasExited) running.push(session);
+		}
+		return running.sort((a, b) => a.id - b.id);
 	}
 
 	get size(): number {
@@ -61,18 +65,15 @@ export class SessionStore {
 	}
 
 	/** Remove a session (e.g., when it exits). */
-	remove(id: number): ExecSession | undefined {
-		const entry = this.sessions.get(id);
-		if (!entry) return undefined;
+	remove(id: number): void {
 		this.sessions.delete(id);
-		return entry;
 	}
 
 	/** Terminate all sessions and clear the store. Used on session_shutdown. */
 	terminateAll(): ExecSession[] {
 		const drained = this.values();
 		this.sessions.clear();
-		for (const session of drained) this.terminateEvicted(session, "shutdown");
+		for (const session of drained) killBestEffort(session);
 		return drained;
 	}
 
@@ -95,16 +96,15 @@ export class SessionStore {
 			break;
 		}
 		this.sessions.delete(victim.id);
-		this.terminateEvicted(victim, "lru");
+		killBestEffort(victim);
 		return victim;
 	}
+}
 
-	private terminateEvicted(session: ExecSession, reason: "lru" | "shutdown"): void {
-		try {
-			session.terminate();
-		} catch {
-			// ignore
-		}
-		this.onEvict?.(session, reason);
+function killBestEffort(session: ExecSession): void {
+	try {
+		session.kill();
+	} catch {
+		// Keep cleaning up other sessions when signaling fails.
 	}
 }

@@ -3,7 +3,7 @@
  *
  * We use synthetic ExecSession-like stubs so we don't have to spawn real
  * processes in unit tests. The store only relies on `id`, `lastUsed`,
- * `hasExited`, and `terminate()`.
+ * `hasExited`, and `kill()`.
  */
 
 import { strict as assert } from "node:assert";
@@ -15,7 +15,7 @@ class StubSession {
 	terminatedWith: NodeJS.Signals | null = null;
 	constructor(readonly id: number, readonly lastUsed: number, readonly hasExited = false) {}
 
-	terminate(signal: NodeJS.Signals = "SIGTERM") {
+	kill(signal: NodeJS.Signals = "SIGTERM") {
 		this.terminatedWith = signal;
 	}
 }
@@ -115,22 +115,5 @@ describe("SessionStore", () => {
 		assert.equal(store.size, 0);
 		assert.equal((a as unknown as StubSession).terminatedWith, "SIGTERM");
 		assert.equal((b as unknown as StubSession).terminatedWith, "SIGTERM");
-	});
-
-	it("onEvict callback fires for LRU and shutdown", () => {
-		const events: Array<{ id: number; reason: string }> = [];
-		const store = new SessionStore({
-			maxSessions: 2,
-			lruProtectedCount: 1,
-			onEvict: (s, reason) => events.push({ id: s.id, reason }),
-		});
-		store.insert(stub(1, 1000, /*exited*/ true));
-		store.insert(stub(2, 2000));
-		store.insert(stub(3, 3000)); // evicts 1
-		assert.deepEqual(events, [{ id: 1, reason: "lru" }]);
-
-		store.terminateAll();
-		const reasons = events.slice(1).map((e) => e.reason).sort();
-		assert.deepEqual(reasons, ["shutdown", "shutdown"]);
 	});
 });
