@@ -170,21 +170,16 @@ export function killNotFoundScriptResult(sessionId: number): KillScriptResult {
 export const setOnExitScriptResultSchema = Type.Object({
 	session_id: Type.Number(),
 	found: Type.Boolean({ description: "False when no session or pending wake had this id." }),
-	on_exit: onExitSchema,
+	on_exit: Type.Optional(Type.Union([Type.Literal("none"), Type.Literal("wake"), Type.Literal("consumed")], {
+		description: "Wake status. None is returned when this call disarms a pending wake.",
+	})),
 	status: Type.Optional(Type.String()),
 	running: Type.Optional(Type.Boolean()),
 	wake_armed: Type.Optional(Type.Boolean()),
 });
 export type SetOnExitScriptResult = Static<typeof setOnExitScriptResultSchema>;
 
-export function setOnExitScriptResult(value: {
-	session_id: number;
-	found: boolean;
-	on_exit?: OnExitStatus;
-	status?: string;
-	running?: boolean;
-	wake_armed?: boolean;
-}): SetOnExitScriptResult {
+export function setOnExitScriptResult(value: SetOnExitScriptResult): SetOnExitScriptResult {
 	return compact({ ...value });
 }
 

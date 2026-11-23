@@ -1204,7 +1204,8 @@ export default function (pi: ExtensionAPI) {
 			}
 			const running = session ? !session.hasExited : false;
 			const armed = ctx.coordinator.isArmed(sid);
-			const onExit = armed ? "wake" : session && ctx.coordinator.onExitStatus(session);
+			const onExit: OnExitStatus | "none" | undefined =
+				status === "disarmed" ? "none" : session && ctx.coordinator.onExitStatus(session);
 			const result = {
 				session_id: sid,
 				found: true,

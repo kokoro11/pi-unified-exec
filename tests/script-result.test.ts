@@ -228,6 +228,10 @@ describe("registered tools return structuredContent", () => {
 		const armed = await call("set_on_exit", { session_id: sid, on_exit: "wake" });
 		assert.ok(Value.Check(setOnExitScriptResultSchema, armed.structuredContent));
 		assert.equal(armed.structuredContent.wake_armed, true);
+		const disarmed = await call("set_on_exit", { session_id: sid, on_exit: "none" });
+		assert.ok(Value.Check(setOnExitScriptResultSchema, disarmed.structuredContent));
+		assert.equal(disarmed.structuredContent.on_exit, "none");
+		await call("set_on_exit", { session_id: sid, on_exit: "wake" });
 		const unknownOnExit = await call("set_on_exit", { session_id: 999_999, on_exit: "wake" });
 		assert.ok(Value.Check(setOnExitScriptResultSchema, unknownOnExit.structuredContent));
 		assert.equal(unknownOnExit.structuredContent.found, false);

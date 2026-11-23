@@ -50,7 +50,7 @@ In `chars`, use `\n` for a pipe's newline, `\r` for Enter in a terminal (includi
 
 A wake sends a follow-up with exit metadata and a log number when available. Any successful tool result that observes the completion consumes the pending wake. A deadline, steer, or cancellation keeps it armed. Use `set_on_exit` with `"none"` when you no longer want a wake; a follow-up already queued to Pi stays queued.
 
-Tool replies and Codemode details report `on_exit: "wake"` while a wake is active. They report `on_exit: "consumed"` when the exit is returned directly, the follow-up has been sent, or a successful kill retires the wake. The `on_exit` field is omitted for sessions without a wake policy, including after disarming a pending wake.
+Tool replies and Codemode details report `on_exit: "wake"` while a wake is active. They report `on_exit: "consumed"` when the exit is returned directly, the follow-up has been sent, or a successful kill retires the wake. A `set_on_exit` call that disarms a pending wake reports `on_exit: "none"`. Results otherwise omit `on_exit` for sessions without a wake policy.
 
 ## Output and logs
 

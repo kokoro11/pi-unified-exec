@@ -129,7 +129,7 @@ async function waitFor(cond: () => boolean | Promise<boolean>, timeoutMs = 8000)
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function assertOnExit(result: Awaited<ReturnType<ToolDef["execute"]>>, expected?: "wake" | "consumed"): void {
+function assertOnExit(result: Awaited<ReturnType<ToolDef["execute"]>>, expected?: "none" | "wake" | "consumed"): void {
 	const scriptDetails = result.structuredContent.details ?? result.structuredContent;
 	for (const details of [result.details, scriptDetails]) {
 		assert.equal(Object.hasOwn(details, "on_exit"), expected !== undefined);
@@ -351,11 +351,17 @@ describe("exec_command on_exit", () => {
 		const r2 = await h.call("set_on_exit", { session_id: sid, on_exit: "none" });
 		assert.equal(r2.details.status, "disarmed");
 		assert.equal(r2.details.wake_armed, false);
-		assertOnExit(r2);
+		assertOnExit(r2, "none");
+		const unchanged = await h.call("set_on_exit", { session_id: sid, on_exit: "none" });
+		assert.equal(unchanged.details.status, "already_none");
+		assertOnExit(unchanged);
 		// Wait until the process is gone (list reaps it) then confirm no wake.
 		assert.ok(
 			await waitFor(async () => {
 				const l = await h.call("list_sessions", {});
+				assert.equal(Object.hasOwn(l.details.sessions[0], "on_exit"), false);
+				assert.equal(Object.hasOwn(l.structuredContent.sessions[0], "on_exit"), false);
+				assert.doesNotMatch(l.content[0].text, /^\s+on_exit:/m);
 				return l.details.active_count === 0;
 			}),
 			"process should exit",
