@@ -170,8 +170,7 @@ describe("unified-exec e2e", () => {
 	it("write_stdin returns the final result when the process already exited before the write", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
-		// 3 ticks @ 200ms = 600ms runtime. Yield at 250ms -> session_id returned.
-		// Then wait 800ms so the process exits, then poll.
+		// Yield at 250ms while the command is still printing ticks.
 		const startedAt = performance.now();
 		const r1 = await h.call("exec_command", {
 			cmd: "for i in 1 2 3; do echo tock $i; sleep 0.2; done",
@@ -183,8 +182,9 @@ describe("unified-exec e2e", () => {
 		);
 		const sid = r1.details.session_id;
 
-		// Wait for the process to definitely exit (600ms runtime - 250ms yield + slack).
-		await new Promise((r) => setTimeout(r, 800));
+		assert.ok(await waitFor(() => !h.uiEvents.statuses.get("unified-exec.sessions")), "session did not exit");
+		// Leave a gap to check that the reported lifetime stopped at exit.
+		await new Promise((r) => setTimeout(r, 150));
 
 		// Try a write — the process has already exited, but the store should still have
 		// the entry so we can observe the exit and drain trailing output.
@@ -365,7 +365,8 @@ describe("unified-exec e2e", () => {
 			});
 			const sid = started.details.session_id;
 			assert.equal(typeof sid, "number", JSON.stringify(started.details));
-			await new Promise((resolve) => setTimeout(resolve, 900));
+			assert.ok(await waitFor(() => !h.uiEvents.statuses.get("unified-exec.sessions")), "session did not exit");
+			await new Promise((resolve) => setTimeout(resolve, 150));
 			const secondsBeforeKill = (performance.now() - launchedAt) / 1000;
 			const killed = await h.call("kill_session", { session_id: sid });
 			const total = killed.details.total_time_seconds;
@@ -375,8 +376,10 @@ describe("unified-exec e2e", () => {
 			assert.match(killed.details.output, /finished-before-kill/);
 			assert.equal(killed.structuredContent?.details.total_time_seconds, total);
 			assert.equal(killed.structuredContent?.details.pid, killed.details.pid);
+			assert.equal(killed.structuredContent?.details.output, killed.details.output);
 			assert.equal(killed.structuredContent?.text, killed.content[0].text);
 			assert.ok(killed.content[0].text.startsWith(`[killed #${sid}]\n`));
+			assert.match(killed.content[0].text, /\n---\nfinished-before-kill\n/);
 			assert.doesNotMatch(killed.content[0].text, /^(?:session_id|pid|running|escalated):/m);
 		} finally {
 			await h.emit("session_shutdown");

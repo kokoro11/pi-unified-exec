@@ -27,7 +27,9 @@ Takes a `session_id` from `exec_command`. Omit input to poll, or send input befo
 | `yield_time_ms` | `250` with input; `5000` for an empty poll | With input, clamped to 250–30,000 ms. For an empty poll the minimum is 5000 ms and there is no built-in maximum. Supply a finite non-negative duration within `Number.MAX_SAFE_INTEGER`; fractions round down. |
 | `on_exit` | Keep the current policy | `"none"` disarms a pending wake. `"wake"` arms a live session. Use `"wake"` only when the human requests automatic resumption. |
 
-Pass `session_id` and `on_exit` alone to change the wake policy immediately and leave output buffered, even if the session has exited. A separate poll collects that output if the session is still available. This also lets you disarm a pending wake after its session has been evicted. A follow-up already queued to Pi stays queued. If you supply input or `yield_time_ms`, `write_stdin` applies the policy first, then writes or polls as usual.
+Pass `session_id` and `on_exit` alone to apply the wake policy and drain available output without waiting for the process to exit. If the session has already exited, the same call collects its final output and retires the session ID. A late `"wake"` request cannot arm a new wake for an exited session. The reply explains this and reports `"none"` if there was no wake or `"consumed"` if the wake has already been resolved. If an existing wake is still pending, collecting the exit consumes it.
+
+This form also lets you disarm a pending wake after its session has been evicted. A follow-up already queued to Pi stays queued. If you supply input or `yield_time_ms`, `write_stdin` applies the policy first, then writes or polls as usual.
 
 ### Waiting and cancellation
 
@@ -52,13 +54,13 @@ In `chars`, use `\n` for a pipe's newline, `\r` for Enter in a terminal (includi
 
 A wake sends a follow-up with exit metadata and a log number when available. A successful poll or listing that reports the exit consumes a pending wake. A deadline, steer, or cancellation keeps it armed. To disarm promptly, call `write_stdin` with the session ID and `on_exit: "none"`.
 
-Tool replies and Codemode details report `on_exit: "wake"` while a wake is active. They report `on_exit: "consumed"` when an output collection or listing reports the exit, the follow-up has been sent, or a successful kill retires the wake. A `write_stdin` call that disarms a pending wake reports `on_exit: "none"`. Results otherwise omit `on_exit` for sessions without a wake policy.
+Tool replies and Codemode details report `on_exit: "wake"` while a wake is active. They report `on_exit: "consumed"` when an output collection or listing reports an armed exit, the follow-up has been sent, or a successful kill retires the wake. When `write_stdin` receives an `on_exit` argument it always reports the resulting status, including `on_exit: "none"` when the session has neither an active nor a consumed wake. Other calls omit the field for sessions without a wake policy.
 
 ## Output and logs
 
 Text durations use whole milliseconds below 1s, up to four significant digits below 1000s, and whole seconds from 1000s. Terminal previews, wait labels, session lists, widgets, pickers, and wake messages share this format. Script details retain their numeric units.
 
-Process and kill results show up to 50 KiB or 2,000 lines of terminal-safe text. More than 1 MiB of output between drains can also leave a gap in the in-memory buffer. Expand a collapsed result with Pi's `app.tools.expand` binding (Ctrl+O by default) to see the full **bounded** result.
+`exec_command`, `write_stdin`, and `kill_session` include the output collected by that call. When there is no output to show, the text says `(no output)` and Codemode's `details.output` is an empty string. Results show up to 50 KiB or 2,000 lines of terminal-safe text. More than 1 MiB of output between drains can also leave a gap in the in-memory buffer. Expand a collapsed result with Pi's `app.tools.expand` binding (Ctrl+O by default) to see the full **bounded** result.
 
 At 512 cumulative raw bytes, the extension starts archiving the full stream, including the initial bytes. Both `log: 4` in the tool reply and `log=4` in the terminal preview point to `.temp/pi-unified-exec/4.log` under **Pi's starting directory**, even if the command uses another `workdir`. Smaller output stays inline. Raw logs can contain terminal control sequences; open them with a plain-text reader or hex viewer.
 

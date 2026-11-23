@@ -4,8 +4,8 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
-- Merge `set_on_exit` into `write_stdin`. Pass `on_exit` alone to change the wake policy immediately and leave output buffered, or include input or a wait duration to combine operations.
-- Report exit notification state in `on_exit` across tool replies, terminal previews, and Codemode details. Use `wake` while active, `consumed` once resolved, and `none` in the `write_stdin` result that disarms a wake. Omit the field from other results for sessions without a wake policy. Remove `completion_notification` and `on_exit_wake`.
+- Merge `set_on_exit` into `write_stdin`. Pass a session ID and `on_exit` to apply the policy and collect available command output without waiting for exit. If the session has already exited, return its exit status and final output even when a new wake can no longer be armed.
+- Report exit notification state in `on_exit` across tool replies, terminal previews, and Codemode details. Use `wake` while active and `consumed` once resolved. An explicit `write_stdin` policy always reports the resulting status, including `none` when there is no wake. Omit the field from other results for sessions without a wake policy. Remove `completion_notification` and `on_exit_wake`.
 - Use tool-reply duration formatting throughout previews, wait labels, session lists, widgets, pickers, wake messages, and displayed wait limits. Keep structured numeric timing fields unchanged.
 - Wait for log metadata in archive integration tests so slow command startup does not cause missing-log failures.
 - Show session lifetime in kill previews and preserve muted footer fields and separators after highlighted statuses across command, input, and kill previews.

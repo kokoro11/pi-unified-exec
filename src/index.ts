@@ -461,28 +461,15 @@ async function runWriteStdin(
 
 	if (policy !== undefined) signal?.throwIfAborted();
 	const change = policy === undefined ? undefined : ctx.coordinator.setOnExit(sid, policy, session);
-	const shape = yieldTimeMs === undefined
-		? finalizeProcessResult({
-			operation: "write_stdin",
-			sessionId: sid,
-			running: !session.hasExited,
-			exitCode: session.exitCode,
-			signal: session.signal,
-			failure: session.failureMessage,
-			wallTimeSec: 0,
-			collected: new Uint8Array(0),
-			tty: session.tty,
-			log: session.log,
-			cwd: session.cwd,
-			command: session.displayCommand,
-			extra: { on_exit: ctx.coordinator.onExitStatus(session) },
-		})
-		: hasInput
-			? await writeAndCollect(ctx, session, writeBytes, yieldTimeMs, signal, steerSignal, onUpdate, toolCallId)
-			: await runAttachedWait(ctx, session, yieldTimeMs, signal, steerSignal, onUpdate, toolCallId);
-	if (change === "disarmed" && !shape.on_exit) shape.on_exit = "none";
+	const getOnExit = (): ResponseShape["on_exit"] =>
+		ctx.coordinator.onExitStatus(session) ?? (policy === undefined ? undefined : "none");
+	const shape = hasInput && yieldTimeMs !== undefined
+		? await writeAndCollect(ctx, session, writeBytes, yieldTimeMs, signal, steerSignal, onUpdate, toolCallId, getOnExit)
+		: await runAttachedWait(ctx, session, yieldTimeMs, signal, steerSignal, onUpdate, toolCallId, getOnExit);
 	if (change === "too_late") {
-		const note = "Could not arm a wake for this session.";
+		const note = session.hasExited
+			? "Session already exited. No new wake was armed."
+			: "Could not arm a wake for this session.";
 		shape.note = shape.note ? `${note} ${shape.note}` : note;
 	}
 	return Object.assign(shape, { session_id: sid, total_time_seconds: session.totalTimeSeconds });
@@ -497,6 +484,7 @@ async function writeAndCollect(
 	steerSignal: AbortSignal | undefined,
 	onUpdate: AgentToolUpdateCallback<ProcessUpdateDetails> | undefined,
 	toolCallId: string,
+	getOnExit: () => ResponseShape["on_exit"],
 ): Promise<ResponseShape> {
 	const finalizeResponse = (input: Omit<FinalizeInput, "sessionId">): ResponseShape =>
 		finalizeProcessResult({ ...input, operation: "write_stdin", sessionId: session.id });
@@ -511,7 +499,7 @@ async function writeAndCollect(
 		const ok = session.write(writeBytes);
 		if (!ok && session.hasExited) {
 			const collected = await session.collect({ deadlineMs: Date.now() + 50, externalAbort: signal });
-			const onExit = ctx.coordinator.onExitStatus(session);
+			const onExit = getOnExit();
 			removeSession(ctx, session.id);
 			ctx.coordinator.markPendingTerminal(session.id, toolCallId);
 			return finalizeResponse({
@@ -535,13 +523,13 @@ async function writeAndCollect(
 		await sleep(100, signal);
 
 		const deadlineMs = start + yieldTimeMs;
-		const pollStream = startStreaming(session, onUpdate, deadlineMs, signal, () => ctx.coordinator.onExitStatus(session));
+		const pollStream = startStreaming(session, onUpdate, deadlineMs, signal, getOnExit);
 		const collected = await session.collect({ deadlineMs, externalAbort: signal, stopSignal: steerSignal });
 		pollStream.stop();
 		const wallSec = (Date.now() - start) / 1000;
 		const steered = steerSignal?.aborted === true && signal?.aborted !== true && Date.now() < deadlineMs;
 
-		const onExit = ctx.coordinator.onExitStatus(session);
+		const onExit = getOnExit();
 		if (session.hasExited) {
 			removeSession(ctx, session.id);
 			// Terminal result constructed: keep the lease until Pi finalizes it
@@ -594,10 +582,10 @@ async function writeAndCollect(
 }
 
 /** Extra fields for a tool result that directly reports completion. */
-function directCompletionFields(onExit: OnExitStatus | undefined): Partial<ResponseShape> {
+function directCompletionFields(onExit: ResponseShape["on_exit"]): Partial<ResponseShape> {
 	return {
 		completion_delivery: "direct",
-		on_exit: onExit ? "consumed" : undefined,
+		on_exit: onExit === "wake" ? "consumed" : onExit,
 	};
 }
 
@@ -605,11 +593,12 @@ function directCompletionFields(onExit: OnExitStatus | undefined): Partial<Respo
 async function runAttachedWait(
 	ctx: ExtensionCtx,
 	session: ExecSession,
-	durationMs: number,
+	durationMs: number | undefined,
 	signal: AbortSignal | undefined,
 	steerSignal: AbortSignal | undefined,
 	onUpdate: AgentToolUpdateCallback<ProcessUpdateDetails> | undefined,
 	toolCallId: string,
+	getOnExit: () => ResponseShape["on_exit"],
 ): Promise<ResponseShape> {
 	const startedAt = performance.now();
 	const waitFields: Partial<ResponseShape> = { yield_time_ms: durationMs };
@@ -618,19 +607,19 @@ async function runAttachedWait(
 	let pendingTerminal = false;
 	let streamer: { stop: () => void } | undefined;
 	try {
-		if (onUpdate) {
+		if (onUpdate && durationMs !== undefined) {
 			streamer = startRateLimitedStream({
 				outputNotify: session.outputNotify,
 				minIntervalMs: durationMs <= MAX_YIELD_TIME_MS
 					? OUTPUT_POLL_INTERVAL_MS : LONG_WAIT_UPDATE_INTERVAL_MS,
-				emit: () => onUpdate(buildStreamUpdate(session, ctx.coordinator.onExitStatus(session), waitFields)),
+				emit: () => onUpdate(buildStreamUpdate(session, getOnExit(), waitFields)),
 			});
 		}
 		let outcome: LongWaitOutcome = await waitForExitOrDeadline({
 			exited: session.exited,
 			externalAbort: signal,
 			steerAbort: steerSignal,
-			durationMs,
+			durationMs: durationMs ?? 0,
 		});
 		// Exit wins close races. A cancelled live wait never drains output; a
 		// steered one drains like a reached deadline (the session stays live).
@@ -641,7 +630,7 @@ async function runAttachedWait(
 				deadlineMs: Date.now() + (outcome === "exit" ? 1000 : 0),
 				externalAbort: outcome === "exit" ? undefined : signal,
 			});
-		const onExit = ctx.coordinator.onExitStatus(session);
+		const onExit = getOnExit();
 		const elapsedMs = performance.now() - startedAt;
 		const extra: Partial<ResponseShape> = { ...waitFields };
 		if (outcome === "exit") {
@@ -649,7 +638,7 @@ async function runAttachedWait(
 		} else {
 			if (outcome === "cancelled") extra.wait_status = WAIT_CANCELLED;
 			else if (outcome === "steered") extra.wait_status = WAIT_STEERED;
-			extra.effective_wait_ms = elapsedMs;
+			if (durationMs !== undefined) extra.effective_wait_ms = elapsedMs;
 			extra.note = heldOpenNote(session);
 			extra.on_exit = onExit;
 		}
@@ -662,7 +651,7 @@ async function runAttachedWait(
 			sessionId: session.id,
 			exitCode: outcome === "exit" ? session.exitCode : undefined,
 			signal: outcome === "exit" ? session.signal : null,
-			failure: outcome === "exit" ? session.failureMessage : null,
+			failure: outcome === "exit" || durationMs === undefined ? session.failureMessage : null,
 			tty: session.tty,
 			log: session.log,
 			cwd: session.cwd,
@@ -830,7 +819,7 @@ function clearSessionExitWatchers(ctx: ExtensionCtx): void {
 /** Shared streaming-update payload for attached waits. */
 function buildStreamUpdate(
 	session: ExecSession,
-	onExit: OnExitStatus | undefined,
+	onExit: ResponseShape["on_exit"],
 	extra?: Partial<ProcessResultDetails>,
 ): AgentToolResult<ProcessUpdateDetails> {
 	const tailText = sanitizeOutputText(decode(session.snapshotStreamTail()));
@@ -871,7 +860,7 @@ function startStreaming(
 	onUpdate: AgentToolUpdateCallback<ProcessUpdateDetails> | undefined,
 	deadlineMs: number,
 	externalAbort: AbortSignal | undefined,
-	getOnExit: () => OnExitStatus | undefined,
+	getOnExit: () => ResponseShape["on_exit"],
 ): { stop: () => void } {
 	if (!onUpdate) return { stop: () => {} };
 	let stopped = false;
@@ -1144,7 +1133,7 @@ export default function (pi: ExtensionAPI) {
 		name: "write_stdin",
 		label: "write_stdin",
 		description:
-			"Send input, poll for output or exit, or change a session's wake policy. Use `chars` for text with C-style escapes (e.g. \\x03 Ctrl-C, \\x1b ESC, \\n newline) and `chars_b64` for raw binary. With on_exit and neither input nor yield_time_ms, update the policy and return immediately, leaving output buffered. Empty polls accept a finite relative yield_time_ms with no built-in maximum. The reply keeps the session ID at exit.",
+			"Send input, poll for output or exit, or change a session's wake policy. Use `chars` for text with C-style escapes (e.g. \\x03 Ctrl-C, \\x1b ESC, \\n newline) and `chars_b64` for raw binary. With on_exit and neither input nor yield_time_ms, update the policy and collect available output without waiting for exit. Empty polls accept a finite relative yield_time_ms with no built-in maximum. The reply keeps the session ID at exit.",
 		promptSnippet: "Send input, poll or collect output, or change a session's wake policy",
 		promptGuidelines: [
 			"write_stdin: Don't use chars and chars_b64 at the same time.",
@@ -1175,7 +1164,7 @@ export default function (pi: ExtensionAPI) {
 			),
 			on_exit: Type.Optional(StringEnum(
 				["none", "wake"] as const,
-				'Omit to keep the policy. "none" disarms a pending wake. "wake" arms a live session. Without input or yield_time_ms, return immediately.',
+				'Omit to keep the policy. "none" disarms a pending wake. "wake" arms a live session. Passing on_exit includes the current wake status in the reply. Without input or yield_time_ms, collect available output without waiting for exit.',
 			)),
 		}),
 		async execute(toolCallId, params, signal, onUpdate, eventCtx) {

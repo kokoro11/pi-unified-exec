@@ -33,13 +33,14 @@ function makeHarness() {
 	const uiEvents = {
 		notifications: [] as Array<{ message: string; type?: string }>,
 		selectResponses: [] as Array<(options: string[]) => string | undefined>,
+		statuses: new Map<string, string | undefined>(),
 	};
 
 	const stubCtx = {
 		cwd: process.cwd(),
 		ui: {
 			notify: (message: string, type?: string) => uiEvents.notifications.push({ message, type }),
-			setStatus: () => {},
+			setStatus: (key: string, value: string | undefined) => uiEvents.statuses.set(key, value),
 			setWidget: () => {},
 			select: (_title: string, options: string[]) => {
 				const responder = uiEvents.selectResponses.shift();
@@ -279,10 +280,13 @@ describe("exec_command on_exit", () => {
 		assert.match(message.content, /exit_code=0/);
 		assert.ok(!message.content.includes("BYE"), "wake must not contain raw stdout");
 
-		// After the wake, the exited session's output is still retrievable…
-		const r2 = await h.call("write_stdin", { session_id: sid, yield_time_ms: 5000 });
+		// A new wake request after delivery still collects the final output.
+		const r2 = await h.call("write_stdin", { session_id: sid, on_exit: "wake" });
 		assert.equal(r2.details.exit_code, 0);
-		assert.ok(r2.details.output.includes("BYE"));
+		assert.match(r2.details.output, /BYE/);
+		assert.match(r2.content[0].text, /\n---\nBYE\n/);
+		assert.equal(r2.structuredContent.details.output, r2.details.output);
+		assert.equal(r2.details.note, "Session already exited. No new wake was armed.");
 		assertOnExit(r2, "consumed");
 		await h.finalizeTool(r2.toolCallId, false);
 		// …and consuming it does not send another wake.
@@ -338,11 +342,11 @@ describe("exec_command on_exit", () => {
 		await h.emit("session_shutdown");
 	});
 
-	it("write_stdin disarms a wake immediately and leaves output available for polling", async () => {
+	it("write_stdin disarms a wake and drains available output without waiting for exit", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
 		const r1 = await h.call("exec_command", {
-			cmd: "sleep 0.8; echo buffered; exit 1",
+			cmd: "sleep 0.8; echo buffered; read -r line; echo finished; exit 1",
 			yield_time_ms: 250,
 			on_exit: "wake",
 		});
@@ -350,22 +354,59 @@ describe("exec_command on_exit", () => {
 		assert.ok(typeof sid === "number");
 		const r2 = await h.call("write_stdin", { session_id: sid, on_exit: "none" });
 		assert.equal(r2.details.running, true);
-		assert.equal(r2.details.output, "");
 		assertOnExit(r2, "none");
-		const unchanged = await h.call("write_stdin", { session_id: sid, on_exit: "none" });
-		assertOnExit(unchanged);
+		let drained = r2;
 		assert.ok(await waitFor(async () => {
-			const policyOnly = await h.call("write_stdin", { session_id: sid, on_exit: "none" });
-			assert.equal(policyOnly.details.output, "");
-			return !policyOnly.details.running;
-		}));
-		const polled = await h.call("write_stdin", { session_id: sid, yield_time_ms: 5000 });
-		assertOnExit(polled);
-		assert.equal(polled.details.exit_code, 1);
-		assert.match(polled.details.output, /buffered/);
+			if (drained.details.output.includes("buffered")) return true;
+			drained = await h.call("write_stdin", { session_id: sid, on_exit: "none" });
+			return drained.details.output.includes("buffered");
+		}), "expected buffered output while the child waited for input");
+		assert.equal(drained.details.running, true);
+		assert.equal(drained.details.yield_time_ms, undefined);
+		assertOnExit(drained, "none");
+		assert.match(drained.content[0].text, /\n---\nbuffered\n/);
+		assert.equal(drained.structuredContent.details.output, drained.details.output);
+
+		const unchanged = await h.call("write_stdin", { session_id: sid, on_exit: "none" });
+		assert.equal(unchanged.details.output, "");
+		assertOnExit(unchanged, "none");
+		const finished = await h.call("write_stdin", { session_id: sid, chars: "done\\n", yield_time_ms: 5000 });
+		assertOnExit(finished);
+		assert.equal(finished.details.exit_code, 1);
+		assert.match(finished.details.output, /finished/);
 		await sleep(400);
 		assert.equal(h.sentMessages.length, 0, "disarmed wake must not fire");
 	});
+
+	for (const initialPolicy of ["none", "wake"] as const) {
+		it(`write_stdin collects an already-exited session started with on_exit: ${initialPolicy}`, async () => {
+			const h = makeHarness();
+			await h.emit("session_start");
+			const started = await h.call("exec_command", {
+				cmd: "sleep 0.6; echo finished-before-wake; exit 7",
+				yield_time_ms: 250,
+				on_exit: initialPolicy,
+			});
+			const sid = started.details.session_id;
+			assert.equal(typeof sid, "number");
+			assert.ok(await waitFor(() => h.uiEvents.statuses.get("unified-exec.sessions") === undefined));
+			assert.equal(h.sentMessages.length, 0, "collect before a pending wake is delivered");
+
+			const result = await h.call("write_stdin", { session_id: sid, on_exit: "wake" });
+			assert.equal(result.details.running, false);
+			assert.equal(result.details.exit_code, 7);
+			assertOnExit(result, initialPolicy === "wake" ? "consumed" : "none");
+			assert.match(result.content[0].text, new RegExp(`^\\[exited #${sid} error 7\\]`));
+			if (initialPolicy === "wake") assert.equal(result.details.note, undefined);
+			else assert.match(result.content[0].text, /^note: Session already exited\. No new wake was armed\.$/m);
+			assert.match(result.content[0].text, /\n---\nfinished-before-wake\n/);
+			assert.equal(result.structuredContent.details.output, result.details.output);
+			await h.finalizeTool(result.toolCallId, false);
+			await sleep(400);
+			assert.equal(h.sentMessages.length, 0);
+			await assert.rejects(h.call("write_stdin", { session_id: sid, on_exit: "wake" }), /unknown session_id/);
+		});
+	}
 
 	it("write_stdin arms a session without waiting for it to exit", async () => {
 		const h = makeHarness();

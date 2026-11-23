@@ -70,7 +70,7 @@ export const writeStdinScriptResultSchema = Type.Object({
 	details: Type.Object({
 		...processScriptDetailFields,
 		on_exit: Type.Optional(Type.Union([Type.Literal("none"), Type.Literal("wake"), Type.Literal("consumed")], {
-			description: "Wake status. This call reports none when it disarms a pending wake.",
+			description: "Wake status. An explicit on_exit argument always reports the resulting status, including none when no wake is armed or consumed.",
 		})),
 		session_id: Type.Number({ description: "Session ID, retained on exit. Check running before polling again." }),
 		total_time_seconds: Type.Number({ description: "Session lifetime in seconds, frozen at exit." }),
