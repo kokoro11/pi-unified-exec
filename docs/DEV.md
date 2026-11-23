@@ -26,7 +26,7 @@ Set `PI_UNIFIED_EXEC_TEST_CLI` to another Pi `dist/cli.js` to requalify the real
 
 ## Tool guidance
 
-Pi puts `promptGuidelines` entries in the shared Rules section without adding their tool names. Make the applicable tool explicit in the first rule, and prefer `tool_name:` at the start of every tool-specific entry so each rule remains clear on its own. For example: `write_stdin: Don't use chars and chars_b64 at the same time.` Rules shared by several tools should explicitly name the tools they cover.
+Pi puts `promptGuidelines` entries in the shared Rules section without adding their tool names. Make the applicable tool explicit in the first rule, and prefer `tool_name:` at the start of every tool-specific entry so each rule remains clear on its own. For example: `write_stdin: Don't use chars and chars_hex at the same time.` Rules shared by several tools should explicitly name the tools they cover.
 
 ## Code map
 

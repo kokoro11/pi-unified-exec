@@ -814,7 +814,7 @@ describe("unified-exec e2e", () => {
 
 	for (const { channel, input, hex } of [
 		{ channel: "chars", input: { chars: "é\n\x1b\x03|\\x1b:wq\\n\\u001b\\x03\\\\" }, hex: "c3a90a1b037c1b3a77710a1b035c" },
-		{ channel: "chars_b64", input: { chars_b64: "AP8bAwrDqQ==" }, hex: "00ff1b030ac3a9" },
+		{ channel: "chars_hex", input: { chars_hex: " 1a 2Bd F\t 00\nfF " }, hex: "1a2bdf00ff" },
 	] as const) {
 		it(`write_stdin sends the exact bytes for ${channel}`, async () => {
 			const h = makeHarness();
@@ -836,13 +836,19 @@ describe("unified-exec e2e", () => {
 				});
 				const sid = started.details.session_id;
 				assert.equal(typeof sid, "number");
-				if (channel === "chars_b64") {
-					await assert.rejects(h.call("write_stdin", { session_id: sid, chars: "hi", ...input }), /either `chars` or `chars_b64`/);
-					await assert.rejects(h.call("write_stdin", { session_id: sid, chars_b64: "not@valid!" }), /not valid base64/);
+				if (channel === "chars_hex") {
+					await assert.rejects(h.call("write_stdin", { session_id: sid, chars: "hi", ...input }), /either `chars` or `chars_hex`/);
+					for (const chars_hex of ["1a 2Bd", "1a 2G"]) {
+						await assert.rejects(
+							h.call("write_stdin", { session_id: sid, chars_hex, yield_time_ms: 0, on_exit: "wake" }),
+							/two hex digits .* per byte/,
+						);
+					}
 				}
 				const result = await h.call("write_stdin", { session_id: sid, ...input, yield_time_ms: 3000 });
 				assert.equal(result.details.output, hex);
 				assert.equal(result.details.exit_code, 0);
+				assert.equal(result.details.on_exit, undefined);
 			} finally {
 				await h.emit("session_shutdown");
 			}

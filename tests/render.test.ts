@@ -8,6 +8,7 @@ import {
 	renderKillSessionResult,
 	renderListSessionsResult,
 	renderProcessResult,
+	renderWriteStdinCall,
 } from "../src/render.ts";
 import {
 	finalizeKillResult,
@@ -68,6 +69,13 @@ beforeAll(() => {
 });
 
 describe("unified-exec renderers", () => {
+	it("labels hex input with its byte count and incomplete hex as invalid", () => {
+		const call = (chars_hex: string) => rendered(renderWriteStdinCall({ session_id: 4, chars_hex }, plainTheme, context({})));
+		assert.match(call("1a2BdF"), /\(hex, 3 bytes\)/);
+		assert.match(call(" 1a 2Bd F "), /\(hex, 3 bytes\)/);
+		assert.match(call("1a 2Bd"), /\(invalid hex\)/);
+	});
+
 	it("kill_session is collapsed to five visual output lines and expands on demand", () => {
 		const output = Array.from({ length: 20 }, (_, index) => `line-${index + 1}`).join("\n");
 		const details = finalizeKillResult({

@@ -23,7 +23,7 @@ Takes a `session_id` from `exec_command`. Omit input to poll, or send input befo
 | Parameter | Default | Use |
 | --- | --- | --- |
 | `chars` | Empty | Text and C-style escapes, written as UTF-8. |
-| `chars_b64` | Empty | Base64 for exact bytes. Use it instead of `chars`; malformed base64 is rejected. |
+| `chars_hex` | Empty | Hex for exact bytes. Use it instead of `chars`. Whitespace and letter case do not matter. |
 | `yield_time_ms` | `250` with input; `10000` for an empty poll | How long the call stays attached. `0` sends any input and collects available output without waiting for more. |
 | `on_exit` | Keep the current policy | `"none"` disarms a pending wake. `"wake"` arms a live session. Use `"wake"` only when the human requests automatic resumption. |
 
@@ -42,7 +42,9 @@ This form also lets you disarm a pending wake after its session has been evicted
 
 ### Sending input
 
-In `chars`, use `\n` for a pipe's newline, `\r` for Enter in a terminal (including Windows), and `\x03` for Ctrl-C in a terminal. In pipe mode Ctrl-C is just a byte. Other supported escapes include tabs and control characters (`\t`, `\b`, `\f`, `\v`, `\0`, `\a`, `\e`), Unicode (`\uHHHH`, `\u{H…H}`), hex (`\xHH`), and escaped quotes (`\"`, `\'`). Unknown escapes stay literal. Use `\\` for a literal backslash and `chars_b64` for arbitrary binary, including bytes above `0x7F`.
+In `chars`, use `\n` for a pipe's newline, `\r` for Enter in a terminal (including Windows), and `\x03` for Ctrl-C in a terminal. In pipe mode Ctrl-C is just a byte. Other supported escapes include tabs and control characters (`\t`, `\b`, `\f`, `\v`, `\0`, `\a`, `\e`), Unicode (`\uHHHH`, `\u{H…H}`), hex (`\xHH`), and escaped quotes (`\"`, `\'`). Unknown escapes stay literal. Use `\\` for a literal backslash.
+
+Use `chars_hex` to write arbitrary bytes, including values above `0x7F`. Both `1a2BdF` and ` 1a 2Bd F ` send `1a 2b df`. After whitespace is removed, each byte needs two hex digits. Invalid digits or an incomplete byte reject the call without writing or polling.
 
 ## Session management
 

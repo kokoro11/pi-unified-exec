@@ -27,6 +27,7 @@ import type { OnExitPolicy, OnExitStatus } from "./completion.ts";
 import { formatElapsed, formatWallTime } from "./format-time.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
 import { type KillResultDetails, type OutputResultDetails, type ProcessResultDetails, WAIT_CANCELLED, WAIT_STEERED } from "./tool-result.ts";
+import { hexByteLength } from "./unescape.ts";
 
 type ExportedRenderCall<TState> = NonNullable<ToolDefinition<any, any, TState>["renderCall"]>;
 type ToolRenderContext<TState = any, TArgs = any> = Parameters<ExportedRenderCall<TState>>[2] & {
@@ -137,7 +138,7 @@ export function renderExecCommandCall(
 }
 
 export function renderWriteStdinCall(
-	args: { session_id?: number; chars?: string; chars_b64?: string; yield_time_ms?: number; on_exit?: OnExitPolicy },
+	args: { session_id?: number; chars?: string; chars_hex?: string; yield_time_ms?: number; on_exit?: OnExitPolicy },
 	theme: Theme,
 	context: ToolRenderContext<RenderState, typeof args>,
 ): Component {
@@ -146,14 +147,18 @@ export function renderWriteStdinCall(
 
 	const sid = args?.session_id !== undefined ? args.session_id : "?";
 	const chars = args?.chars ?? "";
-	const b64 = args?.chars_b64 ?? "";
-	const empty = chars.length === 0 && b64.length === 0;
+	const hex = args?.chars_hex?.replace(/\s+/g, "") ?? "";
+	const empty = chars.length === 0 && hex.length === 0;
 	const policyOnly = empty && args?.on_exit !== undefined && args.yield_time_ms === undefined;
-	const op = empty
-		? theme.fg("muted", policyOnly ? "write_stdin" : "⟳ poll")
-		: chars.length > 0
-			? theme.fg("toolTitle", theme.bold(`» ${stringifyChars(chars)}`))
-			: theme.fg("toolTitle", theme.bold(`» (base64, ${base64ByteLength(b64)} bytes)`));
+	let op: string;
+	if (empty) {
+		op = theme.fg("muted", policyOnly ? "write_stdin" : "⟳ poll");
+	} else if (chars.length > 0) {
+		op = theme.fg("toolTitle", theme.bold(`» ${stringifyChars(chars)}`));
+	} else {
+		const length = hexByteLength(hex);
+		op = theme.fg("toolTitle", theme.bold(length === undefined ? "» (invalid hex)" : `» (hex, ${length} bytes)`));
+	}
 	const yieldSuffix = args?.yield_time_ms !== undefined
 		? theme.fg("muted", ` (yield ${formatElapsed(args.yield_time_ms)})`)
 		: "";
@@ -189,12 +194,6 @@ export function renderListSessionsCall(
 	const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
 	text.setText(theme.fg("toolTitle", theme.bold("list_sessions")));
 	return text;
-}
-
-function base64ByteLength(b64: string): number {
-	const compact = b64.replace(/\s+/g, "");
-	const padding = compact.endsWith("==") ? 2 : compact.endsWith("=") ? 1 : 0;
-	return Math.max(0, Math.floor((compact.length * 3) / 4) - padding);
 }
 
 function stringifyChars(chars: string): string {

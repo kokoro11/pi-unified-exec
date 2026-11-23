@@ -4,7 +4,7 @@
  *
  * Tools exposed to the LLM:
  *   - exec_command(cmd, workdir?, shell?, tty?, yield_time_ms?, on_exit?)
- *   - write_stdin(session_id, chars?, chars_b64?, yield_time_ms?, on_exit?)
+ *   - write_stdin(session_id, chars?, chars_hex?, yield_time_ms?, on_exit?)
  *   - kill_session(session_id, signal?)          [pi-flavor; codex has no equivalent]
  *   - list_sessions()                            [pi-flavor]
  *
@@ -75,7 +75,7 @@ import {
 	WAIT_CANCELLED,
 	WAIT_STEERED,
 } from "./tool-result.ts";
-import { unescapeChars } from "./unescape.ts";
+import { hexByteLength, unescapeChars } from "./unescape.ts";
 
 // ---------------- Constants (mirror codex) ----------------
 
@@ -172,34 +172,25 @@ type ExecCommandArgs = {
 type WriteStdinArgs = {
 	session_id: number;
 	chars?: string;
-	chars_b64?: string;
+	chars_hex?: string;
 	yield_time_ms?: number;
 	on_exit?: OnExitPolicy;
 };
 
-/**
- * Resolve the two mutually-exclusive input channels (`chars` and
- * `chars_b64`) to a single byte payload. Throws on conflicts or malformed
- * base64.
- */
-function resolveWriteInput(args: WriteStdinArgs): Uint8Array | undefined {
-	const hasChars = typeof args.chars === "string" && args.chars.length > 0;
-	const hasB64 = typeof args.chars_b64 === "string" && args.chars_b64.length > 0;
-	if (hasChars && hasB64) {
-		throw new Error("write_stdin: pass either `chars` or `chars_b64`, not both.");
+function resolveWriteInput({ chars, chars_hex }: WriteStdinArgs): Uint8Array | undefined {
+	if (chars && chars_hex) {
+		throw new Error("write_stdin: pass either `chars` or `chars_hex`, not both.");
 	}
-	if (hasB64) {
-		const b64 = args.chars_b64!.replace(/\s+/g, "");
-		if (!/^[A-Za-z0-9+/]*={0,2}$/.test(b64)) {
-			throw new Error("write_stdin: `chars_b64` is not valid base64.");
+	if (chars_hex) {
+		const hex = chars_hex.replace(/\s+/g, "");
+		if (!hex) return undefined;
+		// Buffer.from silently stops at an invalid digit or incomplete byte.
+		if (hexByteLength(hex) === undefined) {
+			throw new Error("write_stdin: `chars_hex` must contain two hex digits (0-9, A-F) per byte after removing whitespace.");
 		}
-		return new Uint8Array(Buffer.from(b64, "base64"));
+		return Buffer.from(hex, "hex");
 	}
-	if (hasChars) {
-		// Decode C-style escapes so the LLM can send \x03, \x1b, \n, etc.
-		return textEncoder.encode(unescapeChars(args.chars!));
-	}
-	return undefined;
+	return chars ? textEncoder.encode(unescapeChars(chars)) : undefined;
 }
 
 const HELD_OPEN_NOTE =
@@ -954,10 +945,10 @@ export default function (pi: ExtensionAPI) {
 		name: "write_stdin",
 		label: "write_stdin",
 		description:
-			"Send input, poll for output or exit, or change a session's wake policy. Use `chars` for text with C-style escapes (e.g. \\x03 Ctrl-C, \\x1b ESC, \\n newline) and `chars_b64` for raw binary. Use on_exit to change wake policy. Omit chars when polling for output or exit. #N in the tool output is the session ID.",
+			"Send input, poll for output or exit, or change a session's wake policy. Use `chars` for text with C-style escapes (e.g. \\x03 Ctrl-C, \\x1b ESC, \\n newline) or `chars_hex` for exact bytes. Use on_exit to change wake policy. Omit both input fields to poll. #N in the tool output is the session ID.",
 		promptSnippet: "Send input, poll or collect output, or change a session's wake policy",
 		promptGuidelines: [
-			"write_stdin: Don't use chars and chars_b64 at the same time.",
+			"write_stdin: Don't use chars and chars_hex at the same time.",
 			'write_stdin: Only set on_exit to "wake" when the human asks for auto-resume. To disarm a pending wake promptly, use on_exit: "none" with just the session ID. An exit collected by a poll consumes its wake.',
 			"write_stdin: In tty sessions, submit lines with \\r (the Enter key) rather than \\n: POSIX terminals accept both, but Windows console programs only execute input on \\r.",
 			"exec_command & write_stdin: For very noisy jobs, rely on the log and final/truncated output instead of repeatedly polling.",
@@ -970,12 +961,12 @@ export default function (pi: ExtensionAPI) {
 			chars: Type.Optional(
 				Type.String({
 					description:
-						"Text with C-style escapes: \\xHH, \\uHHHH, \\u{H\u2026}, \\n \\r \\t \\0 \\a \\e \\b \\f \\v \\\\ \\\". Unknown \\X preserved literally. Mutually exclusive with chars_b64.",
+						"Text with C-style escapes: \\xHH, \\uHHHH, \\u{H\u2026}, \\n \\r \\t \\0 \\a \\e \\b \\f \\v \\\\ \\\". Unknown \\X preserved literally. Mutually exclusive with chars_hex.",
 				}),
 			),
-			chars_b64: Type.Optional(
+			chars_hex: Type.Optional(
 				Type.String({
-					description: "Raw bytes (base64) to write. Mutually exclusive with chars.",
+					description: "Exact bytes as hex digits (e.g. '1a 2B dF'). Case-insensitive; whitespace is ignored. Each byte needs two hex digits. Mutually exclusive with chars.",
 				}),
 			),
 			yield_time_ms: Type.Optional(
@@ -988,7 +979,7 @@ export default function (pi: ExtensionAPI) {
 				["none", "wake"] as const,
 				'Omit to keep the policy. "none" disarms a pending wake. "wake" arms a live session.',
 			)),
-		}),
+		}, { additionalProperties: false }),
 		async execute(toolCallId, params, signal, onUpdate, eventCtx) {
 			ctx.sessionUi.ui ??= eventCtx.ui;
 			const steerSignal = steerSignalFor(ctx, toolCallId, eventCtx);

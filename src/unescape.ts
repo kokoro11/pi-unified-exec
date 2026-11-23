@@ -134,6 +134,11 @@ export function unescapeChars(input: string): string {
 	return out;
 }
 
+/** Count the bytes in compact hex, rejecting invalid digits or incomplete bytes. */
+export function hexByteLength(hex: string): number | undefined {
+	return hex.length % 2 === 0 && isHex(hex) ? hex.length / 2 : undefined;
+}
+
 function isHex(s: string): boolean {
 	for (let i = 0; i < s.length; i++) {
 		const c = s.charCodeAt(i);
