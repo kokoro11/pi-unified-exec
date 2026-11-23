@@ -354,6 +354,86 @@ describe("unified-exec e2e", () => {
 		await h.emit("session_shutdown");
 	});
 
+	it.skipIf(!IS_WINDOWS)("Windows: kill_session terminates a shell AND-list and releases inherited pipes", async () => {
+		const h = makeHarness();
+		await h.emit("session_start");
+		try {
+			const started = await h.call("exec_command", {
+				cmd: "sleep 8 && echo tail",
+				yield_time_ms: 300,
+			});
+			const sid = started.details.session_id;
+			assert.equal(typeof sid, "number", JSON.stringify(started.details));
+
+			const killed = await h.call("kill_session", { session_id: sid });
+			assert.equal(killed.details.status, "killed", JSON.stringify(killed.details));
+			assert.equal(killed.details.killed, true);
+			assert.equal(killed.details.running, false);
+			assert.equal(killed.structuredContent?.status, "killed");
+			assert.equal(killed.structuredContent?.running, false);
+			const listed = await h.call("list_sessions", {});
+			assert.ok(!listed.details.sessions.some((s: any) => s.session_id === sid));
+		} finally {
+			await h.emit("session_shutdown");
+		}
+	});
+
+	for (const operation of ["kill_session", "session_shutdown"] as const) {
+		it.skipIf(!IS_WINDOWS)(`Windows: ${operation} terminates an orphan holding pipes after shell exit`, async () => {
+			const h = makeHarness();
+			await h.emit("session_start");
+			try {
+				const leaf = 'console.log("leaf:" + process.pid); setTimeout(() => {}, 8000)';
+				// Skip Node's own kill-on-parent-exit job so the leaf survives
+				// its parent, while remaining in the session's Windows job.
+				const parent = `require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(leaf)}], {stdio:"inherit",detached:true}).unref()`;
+				const started = await h.call("exec_command", {
+					cmd: `node -e '${parent}'`,
+					yield_time_ms: 1000,
+				});
+				const sid = started.details.session_id;
+				assert.equal(typeof sid, "number", JSON.stringify(started.details));
+				assert.match(started.details.note, /shell has exited/);
+				const pid = Number(/leaf:(\d+)/.exec(started.details.output)?.[1]);
+				assert.ok(pid > 0, JSON.stringify(started.details));
+				process.kill(pid, 0);
+
+				if (operation === "kill_session") {
+					const killed = await h.call("kill_session", { session_id: sid });
+					assert.equal(killed.details.status, "killed", JSON.stringify(killed.details));
+				} else {
+					await h.emit("session_shutdown");
+				}
+				assert.ok(await waitFor(() => {
+					try { process.kill(pid, 0); return false; } catch { return true; }
+				}), `orphan ${pid} survived ${operation}`);
+				const listed = await h.call("list_sessions", {});
+				assert.equal(listed.details.active_count, 0, JSON.stringify(listed.details));
+			} finally {
+				await h.emit("session_shutdown");
+			}
+		});
+	}
+
+	it.skipIf(!IS_WINDOWS)("Windows: normal completion preserves descendants with detached stdio", async () => {
+		const h = makeHarness();
+		await h.emit("session_start");
+		let pid: number | undefined;
+		try {
+			const parent = 'const child = require("node:child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 8000)"], {stdio:"ignore",detached:true}); child.unref(); console.log(child.pid)';
+			const finished = await h.call("exec_command", { cmd: `node -e '${parent}'` });
+			assert.equal(finished.details.exit_code, 0, JSON.stringify(finished.details));
+			pid = Number(finished.details.output.trim());
+			assert.ok(pid > 0, JSON.stringify(finished.details));
+			process.kill(pid, 0);
+		} finally {
+			if (pid) {
+				try { process.kill(pid); } catch {}
+			}
+			await h.emit("session_shutdown");
+		}
+	});
+
 	it("kill_session bounds delayed noisy output while the log retains the complete stream", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
@@ -420,9 +500,8 @@ describe("unified-exec e2e", () => {
 		const r2 = await h.call("kill_session", { session_id: sid });
 		if (IS_WINDOWS) {
 			// No POSIX signals on Windows: the initial "SIGTERM" is already a
-			// force tree-kill (taskkill /T /F) and escalation is skipped (a
-			// second identical taskkill can't behave differently). Don't assert
-			// on exit timing (taskkill on a loaded runner can exceed the 2s
+			// Job Object termination and escalation is skipped. Don't assert
+			// on exit timing (a loaded runner can exceed the 2s
 			// window) — assert the session is gone from the store instead.
 			assert.equal(r2.details.escalated, false, `details=${JSON.stringify(r2.details)}`);
 			const l = await h.call("list_sessions", {});

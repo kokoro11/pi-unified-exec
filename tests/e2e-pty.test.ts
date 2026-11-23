@@ -123,6 +123,46 @@ describe.skipIf(!isPtyAvailable())("unified-exec PTY mode", () => {
 		}
 	});
 
+	it.skipIf(!IS_WINDOWS)("Windows: kill_session terminates a PTY shell AND-list", async () => {
+		const h = makeHarness();
+		await h.emit("session_start");
+		try {
+			const started = await h.call("exec_command", {
+				cmd: "sleep 8 && echo tail",
+				tty: true,
+				yield_time_ms: 1500,
+			});
+			const killed = await h.call("kill_session", { session_id: started.details.session_id });
+			assert.equal(killed.details.status, "killed", JSON.stringify(killed.details));
+			assert.equal(killed.details.running, false);
+			assert.equal((await h.call("list_sessions", {})).details.active_count, 0);
+		} finally {
+			await h.emit("session_shutdown");
+		}
+	});
+
+	it.skipIf(!IS_WINDOWS)("Windows: PTY Ctrl-C reaches the command without terminating its launcher", async () => {
+		const h = makeHarness();
+		await h.emit("session_start");
+		try {
+			const started = await h.call("exec_command", {
+				cmd: 'node -e \'process.on("SIGINT",()=>console.log("interrupt-handled")); console.log("interrupt-ready"); setInterval(()=>{},1000)\'',
+				tty: true,
+				yield_time_ms: 1500,
+			});
+			assert.match(started.details.output, /interrupt-ready/);
+			const interrupted = await h.call("write_stdin", {
+				session_id: started.details.session_id,
+				chars: "\x03",
+				yield_time_ms: 1500,
+			});
+			assert.match(interrupted.details.output, /interrupt-handled/);
+			assert.equal(interrupted.details.running, true, JSON.stringify(interrupted.details));
+		} finally {
+			await h.emit("session_shutdown");
+		}
+	});
+
 	it.skipIf(!IS_WINDOWS)("Windows: a kill requested before ConPTY connects terminates the process", async () => {
 		const child = spawnChild({
 			command: ["node", "-e", "setTimeout(() => {}, 3000)"],

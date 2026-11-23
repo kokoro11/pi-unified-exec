@@ -4,6 +4,7 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- On Windows, assign each command to a Job Object before starting the shell. Kill all job members even when intermediate processes have exited, so inherited pipes close and killed sessions leave the store. Apply the same ownership to pipe and PTY sessions, including shutdown, and preserve command handling of terminal Ctrl-C.
 - Prefix tool-specific Rules entries with their tool names and explicitly name the tools covered by shared rules. Document this convention in the development guide because Pi adds these rules without tool-name labels.
 - Remove `yield_until` from `write_stdin`, including UTC parsing, countdown rendering, wait-mode metadata, and tool guidance. Keep relative waits through `yield_time_ms` and consolidate cancellation, steering, and wake coverage around them.
 - Omit `wait_status` entirely on normal completion and reached deadlines. Keep the field optional and include next-step guidance only for cancelled or steered waits.

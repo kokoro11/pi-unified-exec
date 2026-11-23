@@ -17,6 +17,10 @@ const scripts = {
 		'store("remove", undefined); text(load("probe").output); text({remove: load("remove"), models: (await models.getModelsOfType("chat", "exec-codemode-offline")).map(m => m.id)});',
 	],
 	mcp: ['const r = await tools.mcp__fixture__echo({}); text(r);'],
+	kill: [
+		'const started = await tools.exec_command({cmd:"sleep 120 && echo tail", yield_time_ms:300}); store("started", started.details); const killed = await tools.kill_session({session_id:started.details.session_id}); store("killed", killed); text(killed);',
+		'const listed = await tools.list_sessions({}); store("listed", listed); const missing = await tools.kill_session({session_id:load("started").session_id}); store("missing", missing); text(listed); text(missing);',
+	],
 	inactive: [],
 };
 

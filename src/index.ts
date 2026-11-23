@@ -678,7 +678,7 @@ interface TerminateOutcome {
 /**
  * Kill a session (initial signal → 2s grace → SIGKILL escalation), drain its
  * trailing output, and remove it from the store — but ONLY on confirmed
- * exit. A kill that doesn't land (taskkill failure, access denied,
+ * exit. A kill that doesn't land (OS failure, access denied,
  * unkillable state) keeps the session in the store and returns
  * killed: false, so ownership of a live process is never silently dropped.
  * Shared by the kill_session tool and the /unified-exec-sessions command.
@@ -697,9 +697,8 @@ async function terminateSessionById(
 	// Event-driven wait (resolves the instant the exit fires): up to 2s.
 	await waitForExitOrDeadline({ exited: session.exited, durationMs: 2000 });
 	let escalated = false;
-	// On Windows every kill is already a force tree-kill (taskkill /T /F);
-	// a "SIGKILL escalation" would spawn a byte-identical taskkill that
-	// cannot behave differently, so skip it there.
+	// On Windows every signal force-terminates the Job Object. A second
+	// signal uses the same OS operation, so escalation is POSIX-only.
 	if (!session.hasExited && !IS_WINDOWS) {
 		session.kill("SIGKILL");
 		escalated = true;
@@ -993,9 +992,8 @@ export default function (pi: ExtensionAPI) {
 		// Children run detached (own process groups), so anything that ignores
 		// SIGTERM would outlive pi as an orphan. Give them a short grace, then
 		// SIGKILL survivors and wait briefly for confirmation. On Windows the
-		// initial kill is already a force tree-kill and a second taskkill is
-		// byte-identical, so skip the escalation there (the grace wait above
-		// still confirms exits). Event-driven per session: each wait resolves
+		// initial kill already terminates the Job Object, so the grace wait
+		// below confirms exits without escalation. Each wait resolves
 		// the instant that session's exit fires.
 		await Promise.all(drained.map((s) => waitForExitOrDeadline({ exited: s.exited, durationMs: 1000 })));
 		if (!IS_WINDOWS) {

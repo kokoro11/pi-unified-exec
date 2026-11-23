@@ -43,7 +43,7 @@ In `chars`, use `\n` for a pipe's newline, `\r` for Enter in a terminal (includi
 | Tool | Parameters | Result |
 | --- | --- | --- |
 | `set_on_exit` | `session_id`, `on_exit` (`"none"` or `"wake"`) | Disarm a pending wake without killing the process, or arm a live session. An unknown ID returns `found: false`. |
-| `kill_session` | `session_id`, optional `signal` (default `SIGTERM`) | Suppress a pending wake and stop the child. On POSIX, escalate to `SIGKILL` after two seconds as needed. On Windows, force-kill the process tree. An unconfirmed kill leaves the session registered. |
+| `kill_session` | `session_id`, optional `signal` (default `SIGTERM`) | Suppress a pending wake and stop the child. On POSIX, escalate to `SIGKILL` after two seconds as needed. On Windows, force-terminate the session's Job Object, including descendants whose parents have exited. An unconfirmed kill leaves the session registered. |
 | `list_sessions` | None | Include `session_id`, `running`, `wake_armed`, and `log` when available. Report each unobserved exit once, then remove it from the list. |
 
 A wake sends a follow-up with exit metadata and a log number when available. Any successful tool result that observes the completion consumes the pending wake. A deadline, steer, or cancellation keeps it armed. Use `set_on_exit` with `"none"` when you no longer want a wake; a follow-up already queued to Pi stays queued.

@@ -35,8 +35,11 @@ Pi puts `promptGuidelines` entries in the shared Rules section without adding th
 | Tool schemas, lifecycle hooks, and session picker | [`src/index.ts`](../src/index.ts) |
 | Process, buffers, and eviction | [`src/session.ts`](../src/session.ts), [`src/session-store.ts`](../src/session-store.ts), [`src/head-tail-buffer.ts`](../src/head-tail-buffer.ts) |
 | Shell selection, native terminals, and input decoding | [`src/shell.ts`](../src/shell.ts), [`src/pty.ts`](../src/pty.ts), [`src/unescape.ts`](../src/unescape.ts) |
+| Windows process ownership | [`src/windows-job.ts`](../src/windows-job.ts), [`src/windows-launcher.js`](../src/windows-launcher.js) |
 | Attachment windows and wake ownership | [`src/collect.ts`](../src/collect.ts), [`src/long-wait.ts`](../src/long-wait.ts), [`src/steer-gate.ts`](../src/steer-gate.ts), [`src/completion.ts`](../src/completion.ts) |
 | Logs, bounded results, and display | [`src/output-log.ts`](../src/output-log.ts), [`src/tool-result.ts`](../src/tool-result.ts), [`src/render.ts`](../src/render.ts), [`src/codemode-render.ts`](../src/codemode-render.ts) |
+
+On Windows, a Node/Bun launcher waits on a private pipe until `@seydx/win-job` assigns it to a Job Object. Only then does it start the command. The reported PID belongs to this launcher, which exits with the shell's exit code; descendants can still hold its inherited output pipes open. Keep the job handle until those pipes close so explicit kill and shutdown can terminate descendants after their parents exit. Normal completion releases the handle without terminating processes that deliberately detached their stdio.
 
 ## Waits and wakes
 

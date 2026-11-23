@@ -12,6 +12,7 @@ import type { Socket } from "node:net";
 import { constants as osConstants } from "node:os";
 
 import { IS_WINDOWS, resolveBinary } from "./shell.ts";
+import { WindowsJob } from "./windows-job.ts";
 
 export interface SpawnOptions {
 	command: string[];
@@ -137,43 +138,6 @@ export function signalNameFromNumber(num: number): NodeJS.Signals | null {
 }
 
 /**
- * Windows: force-kill the whole process tree rooted at `pid`.
- *
- * There are no POSIX signals or process groups on Windows. Killing only the
- * direct child (the shell) leaves grandchildren alive holding the stdio
- * pipes open, which delays our `close` event indefinitely and orphans the
- * subtree. `taskkill /T /F` terminates the tree rooted at `pid`. Fire-and-
- * forget: the child's `close` event is the source of truth for exit.
- *
- * Limitation: /T enumerates children of a LIVE root — if the direct child
- * already exited while a backgrounded grandchild lives on, taskkill finds
- * nothing to kill. True group semantics would need a Job Object
- * (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE); POSIX handles this case via
- * process groups (`kill -pid` works after the leader exits).
- */
-/**
- * Absolute path to taskkill.exe. Never spawn the bare name: Windows'
- * CreateProcess checks the parent's cwd before PATH, so a taskkill.exe
- * planted in an untrusted repository would execute with every kill.
- */
-function taskkillPath(): string {
-	const root = process.env.SystemRoot ?? process.env.windir ?? "C:\\Windows";
-	return `${root}\\System32\\taskkill.exe`;
-}
-
-function killWindowsTree(pid: number): void {
-	try {
-		const tk = cpSpawn(taskkillPath(), ["/pid", String(pid), "/T", "/F"], {
-			stdio: "ignore",
-			windowsHide: true,
-		});
-		tk.on("error", () => {});
-	} catch {
-		// taskkill missing/unspawnable — nothing more we can do
-	}
-}
-
-/**
  * Windows: node-pty's conpty connection holds a worker thread and named-pipe
  * sockets that keep the Node event loop alive even after the child exits.
  * Dispose them once the terminal is done, otherwise the host process (pi or
@@ -211,24 +175,28 @@ export function spawnChild(opts: SpawnOptions): SpawnedChild {
 function spawnPty(mod: PtyModule, opts: SpawnOptions): SpawnedChild {
 	let [file, ...args] = opts.command;
 	if (!file) throw new Error("spawnChild: empty command");
-	// conpty needs a resolvable executable: bare "bash" fails with
-	// "File not found" while "bash.exe" or an absolute path works. Resolve
-	// PATH ourselves (cached) for names without a directory component.
-	if (IS_WINDOWS) {
-		file = resolveBinary(file);
+	if (IS_WINDOWS) file = resolveBinary(file);
+	let child: PtyProcess;
+	const windowsJob = IS_WINDOWS
+		? new WindowsJob([file, ...args], opts.windowsVerbatimArguments, () => child?.pid)
+		: undefined;
+	if (windowsJob) {
+		[file, ...args] = windowsJob.command;
 	}
-	// node-pty has no windowsVerbatimArguments; its argsToCommandLine()
-	// re-escapes embedded quotes, mangling cmd.exe's pre-quoted /s /c payload
-	// (`/c "echo hi"` becomes `/c \"echo hi\"` — guaranteed syntax error).
-	// Passing args as a single string makes node-pty use it verbatim.
-	const ptyArgs: string[] | string = IS_WINDOWS && opts.windowsVerbatimArguments ? args.join(" ") : args;
-	const child = mod.spawn(file, ptyArgs, {
-		cwd: opts.cwd,
-		env: opts.env,
-		cols: opts.cols ?? 120,
-		rows: opts.rows ?? 30,
-		name: "xterm-256color",
-	});
+	// The launcher receives the original argv over its control pipe, so
+	// node-pty never re-quotes cmd.exe's verbatim /s /c payload.
+	try {
+		child = mod.spawn(file, args, {
+			cwd: opts.cwd,
+			env: opts.env,
+			cols: opts.cols ?? 120,
+			rows: opts.rows ?? 30,
+			name: "xterm-256color",
+		});
+	} catch (error) {
+		windowsJob?.close();
+		throw error;
+	}
 
 	const conpty = IS_WINDOWS ? child._agent : undefined;
 	const conptyInput = conpty?.inSocket;
@@ -238,7 +206,6 @@ function spawnPty(mod: PtyModule, opts: SpawnOptions): SpawnedChild {
 	const exitHandlers = new Set<ExitCallback>();
 	let exited = false;
 	let processExited = false;
-	let windowsKillPending = false;
 
 	const dataSub = child.onData((data) => {
 		const chunk = typeof data === "string" ? new TextEncoder().encode(data) : new Uint8Array(data);
@@ -254,12 +221,13 @@ function spawnPty(mod: PtyModule, opts: SpawnOptions): SpawnedChild {
 		if (exited) return;
 		exited = true;
 		processExited = true;
+		windowsJob?.close();
 		dataSub?.dispose?.();
 		exitSub?.dispose?.();
 		const sigName = signal != null ? signalNameFromNumber(signal) : null;
 		for (const h of exitHandlers) {
 			try {
-				h(sigName ? null : (exitCode ?? 0), sigName);
+				h(sigName ? null : (exitCode ?? 0), sigName, windowsJob?.failureMessage);
 			} catch {
 				// ignore
 			}
@@ -305,15 +273,10 @@ function spawnPty(mod: PtyModule, opts: SpawnOptions): SpawnedChild {
 		kill(signal = "SIGTERM") {
 			if (exited) return;
 			if (IS_WINDOWS) {
-				// Use taskkill to terminate the shell and its descendants.
-				if (child.pid > 0) {
-					killWindowsTree(child.pid);
-				} else if (conpty && !windowsKillPending) {
-					// ConPTY publishes the real PID when its output pipe connects.
-					windowsKillPending = true;
-					conpty.outSocket.once("ready_datapipe", () => {
-						if (!exited && child.pid > 0) killWindowsTree(child.pid);
-					});
+				try {
+					windowsJob!.kill();
+				} catch {
+					// A failed kill leaves the session owned and retryable.
 				}
 				return;
 			}
@@ -329,18 +292,26 @@ function spawnPty(mod: PtyModule, opts: SpawnOptions): SpawnedChild {
 // ---------------- Pipes impl ----------------
 
 function spawnPipes(opts: SpawnOptions): SpawnedChild {
-	const [file, ...args] = opts.command;
-	if (!file) throw new Error("spawnChild: empty command");
-	const child: ChildProcess = cpSpawn(file, args, {
-		cwd: opts.cwd,
-		env: opts.env,
-		// POSIX: own process group so we can `kill -pid` the whole tree.
-		// Windows has no process groups; we tree-kill via taskkill instead.
-		detached: !IS_WINDOWS,
-		stdio: ["pipe", "pipe", "pipe"],
-		windowsHide: true,
-		windowsVerbatimArguments: opts.windowsVerbatimArguments,
-	});
+	if (!opts.command[0]) throw new Error("spawnChild: empty command");
+	let child: ChildProcess;
+	const windowsJob = IS_WINDOWS
+		? new WindowsJob(opts.command, opts.windowsVerbatimArguments, () => child?.pid)
+		: undefined;
+	const [file, ...args] = windowsJob?.command ?? opts.command;
+	try {
+		child = cpSpawn(file, args, {
+			cwd: opts.cwd,
+			env: opts.env,
+			// POSIX: own process group so we can `kill -pid` the whole tree.
+			// Windows uses a Job Object, assigned before the command starts.
+			detached: !IS_WINDOWS,
+			stdio: ["pipe", "pipe", "pipe"],
+			windowsHide: true,
+		});
+	} catch (error) {
+		windowsJob?.close();
+		throw error;
+	}
 
 	const dataHandlers = new Set<(chunk: Uint8Array) => void>();
 	const exitHandlers = new Set<ExitCallback>();
@@ -375,9 +346,10 @@ function spawnPipes(opts: SpawnOptions): SpawnedChild {
 	const finalize = (code: number | null, signal: NodeJS.Signals | null, failureMessage?: string) => {
 		if (exited) return;
 		exited = true;
+		windowsJob?.close();
 		for (const h of exitHandlers) {
 			try {
-				h(code, signal, failureMessage);
+				h(code, signal, failureMessage ?? windowsJob?.failureMessage);
 			} catch {
 				// ignore
 			}
@@ -425,10 +397,11 @@ function spawnPipes(opts: SpawnOptions): SpawnedChild {
 		kill(signal = "SIGTERM") {
 			if (exited || !child.pid) return;
 			if (IS_WINDOWS) {
-				// Windows has no graceful console signal we can deliver from
-				// here (taskkill without /F sends WM_CLOSE, which console apps
-				// ignore). Every signal maps to a force tree-kill.
-				killWindowsTree(child.pid);
+				try {
+					windowsJob!.kill();
+				} catch {
+					// A failed kill leaves the session owned and retryable.
+				}
 				return;
 			}
 			try {

@@ -84,6 +84,22 @@ test("codemode CLI replacement remains inactive without normal activation", () =
 	assert.ok(!fixed.requests[0].tools.some((t: any) => t.name === "codemode"));
 });
 
+test.skipIf(process.platform !== "win32")("codemode CLI kills a Windows shell AND-list and removes its session", () => {
+	const result = run({ pattern: "kill" });
+	const saved = new Map<string, any>();
+	for (const change of stores(result.events)) {
+		for (const [key, value] of Object.entries(change.set ?? {})) saved.set(key, value);
+	}
+	assert.equal(typeof saved.get("started").session_id, "number");
+	assert.equal(saved.get("killed").status, "killed");
+	assert.equal(saved.get("killed").killed, true);
+	assert.equal(saved.get("killed").running, false);
+	assert.equal(saved.get("listed").active_count, 0);
+	assert.equal(saved.get("listed").sessions.length, 0);
+	assert.equal(saved.get("missing").found, false);
+	assert.equal(saved.get("missing").running, false);
+});
+
 test("codemode CLI MCP auto-activates the schema-identical replacement", () => {
 	const fixed = run({ active: false, mcp: true, pattern: "mcp" });
 	const native = run({ fixed: false, active: false, mcp: true, pattern: "mcp" });

@@ -42,7 +42,8 @@
     "typebox": "*"
   },
   "dependencies": {
-    "@homebridge/node-pty-prebuilt-multiarch": "0.15.0"
+    "@homebridge/node-pty-prebuilt-multiarch": "0.15.0",
+    "@seydx/win-job": "0.1.0"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.0.0",
