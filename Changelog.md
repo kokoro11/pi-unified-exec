@@ -4,6 +4,7 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Clarify session IDs, polling, and kill outcomes in the tool descriptions.
 - Shorten the `write_stdin` `on_exit` parameter description.
 - Remove `effective_wait_ms` from `write_stdin` results. Use `wall_time_seconds` for the call's duration.
 - Put the `[pi-unified-exec]` metadata notice and output collection instructions at the top of exit notifications. Label session lifetime `total_time` and simplify the closing instruction.

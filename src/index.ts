@@ -1072,7 +1072,7 @@ export default function (pi: ExtensionAPI) {
 		name: "exec_command",
 		label: "exec_command",
 		description:
-			'Run a command in a persistent session. `[running #N]` means pass N as session_id to write_stdin; `[exited ok]` or `[exited error N]` means the command finished. on_exit defaults to "none". Only pass on_exit: "wake" when the human explicitly wants auto-resume on unobserved exit — stale wakes interrupt later work. Use write_stdin with on_exit to change the policy.',
+			'Run a command in a persistent session. `[running #N]` means N is the session_id; `[exited ok]` or `[exited error N]` means the command finished. on_exit defaults to "none". Only pass on_exit: "wake" when the human explicitly wants auto-resume on unobserved exit. Use write_stdin with on_exit to change the policy.',
 		promptSnippet: "Run a routine shell command or an async/interactive task",
 		promptGuidelines: [
 			`exec_command: For routine commands do not set yield_time_ms to below ${DEFAULT_EXEC_YIELD_MS}, unless it's a background/async/interactive task. The yield_time_ms of the final write_stdin should also not be set below ${DEFAULT_EXEC_YIELD_MS}.`,
@@ -1132,7 +1132,7 @@ export default function (pi: ExtensionAPI) {
 		name: "write_stdin",
 		label: "write_stdin",
 		description:
-			"Send input, poll for output or exit, or change a session's wake policy. Use `chars` for text with C-style escapes (e.g. \\x03 Ctrl-C, \\x1b ESC, \\n newline) and `chars_b64` for raw binary. With on_exit and neither input nor yield_time_ms, update the policy and collect available output without waiting for exit. Empty polls accept a finite relative yield_time_ms with no built-in maximum. The reply keeps the session ID at exit.",
+			"Send input, poll for output or exit, or change a session's wake policy. Use `chars` for text with C-style escapes (e.g. \\x03 Ctrl-C, \\x1b ESC, \\n newline) and `chars_b64` for raw binary. Use on_exit to change wake policy. Omit chars when polling for output or exit. #N in the tool output is the session ID.",
 		promptSnippet: "Send input, poll or collect output, or change a session's wake policy",
 		promptGuidelines: [
 			"write_stdin: Don't use chars and chars_b64 at the same time.",
@@ -1186,7 +1186,7 @@ export default function (pi: ExtensionAPI) {
 		name: "kill_session",
 		label: "kill_session",
 		description:
-			"Terminate a session with SIGTERM, escalating to SIGKILL after 2s on POSIX; Windows force-kills all session processes for any signal. Returns `[killed #N]` or `[kill failed #N]`, with total_time for known sessions. A successful kill invalidates the session ID and suppresses its wake; an unconfirmed kill keeps the session registered.",
+			"Terminate a session with SIGTERM, escalating to SIGKILL after 2s on POSIX; Windows force-kills all session processes for any signal. Returns `[killed #N]` or `[kill failed #N]`, where N is the session ID. A successful kill invalidates the session ID and suppresses its wake; a failed kill won't stop the session.",
 		promptSnippet: "Terminate a session",
 		outputSchema: killScriptResultSchema,
 		parameters: Type.Object({
