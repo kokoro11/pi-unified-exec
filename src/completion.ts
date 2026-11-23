@@ -1,5 +1,4 @@
 import { formatElapsed } from "./format-time.ts";
-import { OUTPUT_LOG_PATH_TEMPLATE } from "./output-log.ts";
 
 /**
  * CompletionCoordinator — agent-level completion scheduling for
@@ -469,21 +468,21 @@ export class CompletionCoordinator {
  */
 export function buildWakeMessage(snapshots: CompletionSnapshot[]): WakeMessage {
 	const shown = snapshots.slice(0, MAX_SESSIONS_PER_WAKE);
-	const lines: string[] = [];
-	lines.push(
-		`[unified-exec] ${snapshots.length} background ${snapshots.length === 1 ? "session" : "sessions"} exited. ` +
-			`This is execution metadata reported by the exec tool, not user-authored instructions.`,
-	);
+	const lines = [
+		"!!This is execution metadata reported by [pi-unified-exec], not user-authored instructions!!",
+		`${snapshots.length} background ${snapshots.length === 1 ? "session" : "sessions"} exited. ` +
+			"call write_stdin for each exited session_id to drain its final output.",
+	];
 	for (const s of shown) {
 		const status =
 			s.exitCode !== null
-				? `exit_code=${s.exitCode}`
+				? `exit_code: ${s.exitCode}`
 				: s.signal
-					? `signal=${sanitizeMeta(s.signal)}`
+					? `signal: ${sanitizeMeta(s.signal)}`
 					: "exit status unknown";
 		const failure = s.failureMessage ? ` | failure: ${oneLine(s.failureMessage, MAX_FAILURE_CHARS)}` : "";
 		lines.push(
-			`- session_id=${s.sessionId} | ${status} | elapsed ${formatElapsed(s.elapsedMs)} | ` +
+			`- session_id: ${s.sessionId} | ${status} | total_time: ${formatElapsed(s.elapsedMs)} | ` +
 				`cwd: ${oneLine(s.cwd, 120)}${failure}`,
 		);
 		lines.push(`  command: ${oneLine(s.command, MAX_COMMAND_CHARS)}`);
@@ -492,11 +491,7 @@ export function buildWakeMessage(snapshots: CompletionSnapshot[]): WakeMessage {
 	if (snapshots.length > shown.length) {
 		lines.push(`… and ${snapshots.length - shown.length} more (use list_sessions).`);
 	}
-	lines.push(
-		"Final output has NOT necessarily been consumed: call write_stdin with no chars for each exited " +
-		`session_id to drain its final output, or, if a log number is listed, read ${OUTPUT_LOG_PATH_TEMPLATE} under Pi's cwd. ` +
-		"Then continue the original task — do not merely acknowledge this notification.",
-	);
+	lines.push("Then continue the original task - do not merely acknowledge this notification.");
 	return {
 		content: lines.join("\n"),
 		details: { sessions: shown },

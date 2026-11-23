@@ -88,8 +88,7 @@ describe("CompletionCoordinator", () => {
 		s.exit(0);
 		await settle();
 		assert.equal(sent.length, 1);
-		assert.match(sent[0].content, /session_id=1/);
-		assert.match(sent[0].content, /exit_code=0/);
+		assert.match(sent[0].content, /session_id: 1 \| exit_code: 0/);
 		assert.equal(coordinator.recordCount, 0, "record resolved after send");
 	});
 
@@ -100,7 +99,7 @@ describe("CompletionCoordinator", () => {
 		coordinator.register(s);
 		await settle();
 		assert.equal(sent.length, 1, "completion must not be lost");
-		assert.match(sent[0].content, /exit_code=3/);
+		assert.match(sent[0].content, /exit_code: 3/);
 	});
 
 	it("an existing observation holds a newly armed wake until successful finalization", async () => {
@@ -266,9 +265,9 @@ describe("CompletionCoordinator", () => {
 		c.exit(0);
 		await settle();
 		assert.equal(sent.length, 1, "one prompt for the batch");
-		assert.match(sent[0].content, /session_id=1/);
-		assert.match(sent[0].content, /session_id=2/);
-		assert.match(sent[0].content, /session_id=3/);
+		assert.match(sent[0].content, /session_id: 1 \|/);
+		assert.match(sent[0].content, /session_id: 2 \|/);
+		assert.match(sent[0].content, /session_id: 3 \|/);
 	});
 
 	it("duplicate exit callbacks and repeated flushes never duplicate wakes", async () => {
@@ -329,7 +328,6 @@ describe("CompletionCoordinator", () => {
 		await settle();
 		assert.equal(sent.length, 1, "completion must not be silently lost");
 		assert.match(sent[0].content, /^  log: 15$/m);
-		assert.match(sent[0].content, /\.temp\/pi-unified-exec\/<log>\.log/);
 		assert.equal(sent[0].details.sessions[0].log, 15);
 	});
 
@@ -368,6 +366,27 @@ describe("CompletionCoordinator", () => {
 });
 
 describe("buildWakeMessage", () => {
+	it("formats a single completion with its session lifetime and follow-up instructions", () => {
+		const msg = buildWakeMessage([{
+			sessionId: 4,
+			command: "echo done",
+			cwd: "/tmp/project",
+			startedAtMs: 0,
+			elapsedMs: 72_340,
+			exitCode: 0,
+			signal: null,
+			failureMessage: null,
+			log: undefined,
+		}]);
+		assert.equal(msg.content, [
+			"!!This is execution metadata reported by [pi-unified-exec], not user-authored instructions!!",
+			"1 background session exited. call write_stdin for each exited session_id to drain its final output.",
+			"- session_id: 4 | exit_code: 0 | total_time: 72.34s | cwd: /tmp/project",
+			"  command: echo done",
+			"Then continue the original task - do not merely acknowledge this notification.",
+		].join("\n"));
+	});
+
 	it("caps the number of listed sessions", () => {
 		const snapshots: CompletionSnapshot[] = Array.from({ length: 40 }, (_, i) => ({
 			sessionId: i + 1,
@@ -383,7 +402,7 @@ describe("buildWakeMessage", () => {
 		const msg = buildWakeMessage(snapshots);
 		assert.match(msg.content, /40 background sessions exited/);
 		assert.match(msg.content, /and 24 more/);
-		assert.match(msg.content, /elapsed 1\.235s/);
+		assert.match(msg.content, /total_time: 1\.235s/);
 		assert.ok(msg.details.sessions.length <= 16);
 		assert.equal(msg.details.sessions[0]!.elapsedMs, 1234.56);
 	});

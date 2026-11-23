@@ -638,7 +638,6 @@ async function runAttachedWait(
 		} else {
 			if (outcome === "cancelled") extra.wait_status = WAIT_CANCELLED;
 			else if (outcome === "steered") extra.wait_status = WAIT_STEERED;
-			if (durationMs !== undefined) extra.effective_wait_ms = elapsedMs;
 			extra.note = heldOpenNote(session);
 			extra.on_exit = onExit;
 		}

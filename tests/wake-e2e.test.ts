@@ -216,7 +216,8 @@ describe("write_stdin attached waits", () => {
 		assertOnExit(r2, "wake");
 		assert.ok(updateStates.length > 0);
 		assert.ok(updateStates.every((state) => state === "wake"));
-		assert.ok(r2.details.effective_wait_ms >= 4900);
+		assert.ok(r2.details.wall_time_seconds >= 4.9);
+		assert.equal(Object.hasOwn(r2.details, "effective_wait_ms"), false);
 		assert.equal(h.sentMessages.length, 0);
 		await h.finalizeTool(r2.toolCallId, false);
 		assert.ok(await waitFor(() => h.sentMessages.length === 1), "wake after later exit");
@@ -276,8 +277,7 @@ describe("exec_command on_exit", () => {
 		assert.equal(message.customType, "unified-exec-completed");
 		assert.equal(message.display, true);
 		assert.deepEqual(options, { triggerTurn: true, deliverAs: "followUp" });
-		assert.match(message.content, new RegExp(`session_id=${sid}`));
-		assert.match(message.content, /exit_code=0/);
+		assert.match(message.content, new RegExp(`session_id: ${sid} \\| exit_code: 0 \\| total_time: `));
 		assert.ok(!message.content.includes("BYE"), "wake must not contain raw stdout");
 
 		// A new wake request after delivery still collects the final output.

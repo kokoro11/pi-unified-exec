@@ -56,7 +56,6 @@ export interface ProcessResultDetails extends OutputResultDetails {
 	yield_time_ms?: number;
 	/** Plain-language guidance present only when a wait is cancelled or steered. */
 	wait_status?: string;
-	effective_wait_ms?: number;
 	completion_delivery?: "direct";
 }
 
