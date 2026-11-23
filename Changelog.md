@@ -4,6 +4,7 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Remove `yield_until` from `write_stdin`, including UTC parsing, countdown rendering, wait-mode metadata, and tool guidance. Keep relative waits through `yield_time_ms` and consolidate cancellation, steering, and wake coverage around them.
 - Omit `wait_status` entirely on normal completion and reached deadlines. Keep the field optional and include next-step guidance only for cancelled or steered waits.
 - Replace `wait_status` outcome codes with plain-language next steps in tool replies and structured results. Put steering guidance directly in this field, remove its duplicate note and prompt guideline, and retain the terminal's short cancellation and steering badges.
 - Simplify the shared tool guidance for retrieving full command output by log number.

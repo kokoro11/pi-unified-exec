@@ -36,7 +36,7 @@ Set `PI_UNIFIED_EXEC_TEST_CLI` to another Pi `dist/cli.js` to requalify the real
 
 ## Waits and wakes
 
-- Both empty poll forms use a single event-driven wait. Convert a UTC deadline once, then use a monotonic clock and bounded timer arms. Keep quiet waits quiet and leave cache warming to Pi.
+- Empty polls use an event-driven wait with a monotonic clock and bounded timer arms. Keep quiet waits quiet and leave cache warming to Pi.
 - Exit wins a simultaneous wait race. Esc leaves output buffered; a human steer drains it like a deadline. Neither cancels the child or disarms a pending wake. Confirm that the `input` steer made it into Pi's queue; release all attached calls together and throw from nested Codemode calls to stop polling scripts.
 - `write_stdin` holds the completion until a successful `tool_execution_end` commits direct delivery. Failed delivery releases the observation. A pending wake can be disarmed after eviction; a failed kill keeps the process registered and restores wake eligibility. Successful kill and shutdown suppress wakes.
 - Read [the public wait contract](TOOLS.md#waiting-and-cancellation) when changing these paths. CLI regressions check that warming can run during a long poll, that another extension can veto warming, and that RPC steering releases the wait.

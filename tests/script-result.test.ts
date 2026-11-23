@@ -186,7 +186,7 @@ describe("registered tools return structuredContent", () => {
 		assert.equal(typeof sid, "number");
 		assert.equal(started.structuredContent.details.status, "running");
 
-		const polled = await call("write_stdin", { session_id: sid, yield_until: new Date().toISOString() });
+		const polled = await call("write_stdin", { session_id: sid, yield_time_ms: 5000 });
 		assert.ok(Value.Check(tools.write_stdin.outputSchema, polled.structuredContent));
 		assertPlainJson(polled.structuredContent);
 		assert.equal(polled.structuredContent.details.running, true);

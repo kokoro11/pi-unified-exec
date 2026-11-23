@@ -226,9 +226,7 @@ describe("unified-exec e2e", () => {
 			assert.equal(r2.details.session_id, sid);
 			assert.equal(r2.details.running, false);
 			assert.equal(r2.details.exit_code, 0);
-			assert.equal(r2.details.wait_mode, "relative");
 			assert.equal(Object.hasOwn(r2.details, "wait_status"), false);
-			assert.equal(r2.details.yield_until, undefined);
 			assert.match(r2.details.output, /long-poll-finished/);
 		} finally {
 			if (previous === undefined) delete process.env[MAX_EMPTY_POLL_ENV_VAR];

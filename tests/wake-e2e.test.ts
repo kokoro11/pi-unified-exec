@@ -1,6 +1,6 @@
 /**
- * Integration tests for write_stdin's `yield_until` (absolute deadline) and
- * exec_command's `on_exit: "wake"` through the real tool pipeline.
+ * Integration tests for write_stdin waits and exec_command's
+ * `on_exit: "wake"` through the real tool pipeline.
  *
  * Uses a stub ExtensionAPI that captures pi.sendMessage calls and can emit
  * tool_execution_end / agent_settled lifecycle events. Subprocess-based tests
@@ -129,66 +129,6 @@ async function waitFor(cond: () => boolean | Promise<boolean>, timeoutMs = 8000)
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** A strict-format future UTC deadline (toISOString matches the accepted grammar). */
-const inFuture = (ms: number) => new Date(Date.now() + ms).toISOString();
-
-describe("write_stdin yield_until", () => {
-	it("validates absolute and relative poll arguments before waiting", async () => {
-		const h = makeHarness();
-		await h.emit("session_start");
-		const started = await h.call("exec_command", { cmd: "sleep 30", yield_time_ms: 250 });
-		const session_id = started.details.session_id;
-		const yield_until = inFuture(5000);
-		await assert.rejects(
-			h.call("write_stdin", { session_id, yield_time_ms: 5000, yield_until }),
-			/not both.*current_utc_time: .+Z$/,
-		);
-		for (const input of [{ chars: "hello\n" }, { chars_b64: "aGk=" }]) {
-			await assert.rejects(
-				h.call("write_stdin", { session_id, ...input, yield_until }),
-				/only valid for an empty poll.*current_utc_time: .+Z$/,
-			);
-		}
-		await assert.rejects(
-			h.call("write_stdin", { session_id, yield_until: "2026-02-30T00:00:00Z" }),
-			/current_utc_time: .+Z$/,
-		);
-		await assert.rejects(h.call("write_stdin", { session_id, yield_time_ms: -1 }), /non-negative finite/);
-
-		// The failed calls leave the session usable; explicit empty input is a poll.
-		const result = await h.call("write_stdin", { session_id, chars: "", yield_until: "2020-01-01T00:00:00Z" });
-		assert.ok(result.details.wall_time_seconds < 3, "past deadlines must poll immediately");
-		assert.equal(result.details.session_id, session_id);
-		assert.equal(result.details.wait_mode, "absolute");
-		assert.equal(Object.hasOwn(result.details, "wait_status"), false);
-		assert.equal(Object.hasOwn(result.structuredContent.details, "wait_status"), false);
-		assert.equal(result.details.running, true);
-	});
-
-	it("returns the terminal result immediately when the process exits before the deadline", async () => {
-		const h = makeHarness();
-		await h.emit("session_start");
-		const r1 = await h.call("exec_command", { cmd: "sleep 0.4 && echo done-marker", yield_time_ms: 250 });
-		const sid = r1.details.session_id;
-		assert.ok(typeof sid === "number", JSON.stringify(r1.details));
-		const t0 = Date.now();
-		const r2 = await h.call("write_stdin", { session_id: sid, yield_until: inFuture(60_000) });
-		assert.ok(Date.now() - t0 < 10_000, "must return on exit, not at the deadline");
-		assert.equal(r2.details.exit_code, 0, JSON.stringify(r2.details));
-		assert.equal(r2.details.session_id, sid);
-		assert.equal(r2.details.running, false);
-		assert.equal(r2.details.wait_mode, "absolute");
-		assert.equal(Object.hasOwn(r2.details, "wait_status"), false);
-		assert.equal(Object.hasOwn(r2.structuredContent.details, "wait_status"), false);
-		assert.equal(r2.details.completion_delivery, "direct");
-		assert.match(r2.details.yield_until, /Z$/);
-		assert.doesNotMatch(r2.content[0].text, /^(?:wait_status|tool_time_utc):/m);
-		assert.ok(r2.details.output.includes("done-marker"), r2.details.output);
-		assert.equal(r2.details.log, undefined, "short output remains inline");
-		await h.emit("session_shutdown");
-	});
-});
-
 describe("write_stdin attached waits", () => {
 	it("retains only bounded output during a long noisy wait", async () => {
 		const h = makeHarness();
@@ -204,7 +144,6 @@ describe("write_stdin attached waits", () => {
 			yield_time_ms: 3 * 2_147_483_647,
 		}, undefined, (p) => updates.push(p));
 		assert.equal(r2.details.exit_code, 0);
-		assert.equal(r2.details.wait_mode, "relative");
 		assert.equal(Object.hasOwn(r2.details, "wait_status"), false);
 		assert.equal(Object.hasOwn(r2.structuredContent.details, "wait_status"), false);
 		assert.ok(r2.details.omitted_bytes > 1024 * 1024, "must retain head/tail, not accumulate every drained chunk");
@@ -215,7 +154,7 @@ describe("write_stdin attached waits", () => {
 		assert.ok(updates.every(p => Buffer.byteLength(p.details.output) <= 32 * 1024));
 	});
 
-	for (const mode of ["relative", "absolute"] as const) it(`${mode} wait cancellation preserves buffered output and the live process`, async () => {
+	it("wait cancellation preserves buffered output and the live process", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
 		const r1 = await h.call("exec_command", {
@@ -223,8 +162,9 @@ describe("write_stdin attached waits", () => {
 			yield_time_ms: 250,
 		});
 		const ac = new AbortController();
-		const deadline = mode === "relative" ? { yield_time_ms: Number.MAX_SAFE_INTEGER } : { yield_until: inFuture(60_000) };
-		const wait = h.call("write_stdin", { session_id: r1.details.session_id, ...deadline }, ac.signal);
+		const wait = h.call("write_stdin", {
+			session_id: r1.details.session_id, yield_time_ms: Number.MAX_SAFE_INTEGER,
+		}, ac.signal);
 		try {
 			assert.ok(await waitFor(() => readFileSync(join(OUTPUT_LOG_DIRECTORY, `${r1.details.log}.log`), "utf8").includes("cancel-marker")));
 		} finally {
@@ -233,7 +173,6 @@ describe("write_stdin attached waits", () => {
 		const r2 = await wait;
 		assert.match(r2.details.wait_status, /^Follow the user's latest instruction before polling this session again\./);
 		assert.match(r2.content[0].text, /^wait_status: Follow the user's latest instruction before polling this session again\./m);
-		assert.equal(r2.details.wait_mode, mode);
 		assert.equal(r2.details.running, true);
 		assert.equal(r2.details.output, "");
 		const killed = await h.call("kill_session", { session_id: r1.details.session_id });
@@ -241,19 +180,24 @@ describe("write_stdin attached waits", () => {
 		assert.match(killed.details.output, /cancel-marker/);
 	});
 
-	it("returns running at the relative deadline without disarming wake", async () => {
+	it("returns running at the deadline and sends exactly one wake after the later exit", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
-		const r1 = await h.call("exec_command", { cmd: "sleep 30", yield_time_ms: 250, on_exit: "wake" });
+		const r1 = await h.call("exec_command", { cmd: "sleep 6.2", yield_time_ms: 250, on_exit: "wake" });
 		const r2 = await h.call("write_stdin", { session_id: r1.details.session_id });
 		assert.equal(r2.details.yield_time_ms, 5000);
 		assert.equal(Object.hasOwn(r2.details, "wait_status"), false);
 		assert.equal(Object.hasOwn(r2.structuredContent.details, "wait_status"), false);
-		assert.equal(r2.details.wait_mode, "relative");
 		assert.equal(r2.details.running, true);
 		assert.equal(r2.details.completion_notification, "armed");
 		assert.ok(r2.details.effective_wait_ms >= 4900);
 		assert.equal(h.sentMessages.length, 0);
+		await h.finalizeTool(r2.toolCallId, false);
+		assert.ok(await waitFor(() => h.sentMessages.length === 1), "wake after later exit");
+		await sleep(600);
+		assert.equal(h.sentMessages.length, 1, "exactly one wake");
+		const r3 = await h.call("write_stdin", { session_id: r1.details.session_id });
+		assert.equal(r3.details.exit_code, 0);
 	});
 });
 
@@ -336,50 +280,13 @@ describe("exec_command on_exit", () => {
 		await h.emit("session_shutdown");
 	});
 
-	it("exit during an absolute yield_until observer is delivered directly, no wake", async () => {
-		const h = makeHarness();
-		await h.emit("session_start");
-		const r1 = await h.call("exec_command", { cmd: "sleep 0.5", yield_time_ms: 250, on_exit: "wake" });
-		const sid = r1.details.session_id;
-		const r2 = await h.call("write_stdin", { session_id: sid, yield_until: inFuture(60_000) });
-		assert.equal(r2.details.exit_code, 0);
-		assert.equal(r2.details.wait_mode, "absolute");
-		assert.equal(r2.details.on_exit_wake, "consumed");
-		await h.finalizeTool(r2.toolCallId, false);
-		await new Promise((res) => setTimeout(res, 600));
-		assert.equal(h.sentMessages.length, 0);
-		await h.emit("session_shutdown");
-	});
-
-	it("absolute deadline first, then exit: still-running result keeps wake armed; exactly one wake follows", async () => {
-		const h = makeHarness();
-		await h.emit("session_start");
-		const r1 = await h.call("exec_command", { cmd: "sleep 1.2", yield_time_ms: 250, on_exit: "wake" });
-		const sid = r1.details.session_id;
-		const r2 = await h.call("write_stdin", { session_id: sid, yield_until: inFuture(400) });
-		assert.equal(r2.details.session_id, sid);
-		assert.equal(Object.hasOwn(r2.details, "wait_status"), false);
-		assert.equal(r2.details.wait_mode, "absolute");
-		assert.equal(r2.details.running, true);
-		assert.doesNotMatch(r2.content[0].text, /^(?:wait_status|tool_time_utc):/m);
-		assert.equal(r2.details.completion_notification, "armed");
-		await h.finalizeTool(r2.toolCallId, false);
-		assert.ok(await waitFor(() => h.sentMessages.length === 1), "wake after later exit");
-		await new Promise((res) => setTimeout(res, 600));
-		assert.equal(h.sentMessages.length, 1, "exactly one");
-		// Lazy drain still works after the wake.
-		const r3 = await h.call("write_stdin", { session_id: sid, yield_time_ms: 5000 });
-		assert.equal(r3.details.exit_code, 0);
-		await h.emit("session_shutdown");
-	});
-
-	it("cancelled absolute wait keeps the wake armed; later exit sends exactly one wake", async () => {
+	it("cancelled wait keeps the wake armed; later exit sends exactly one wake", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
 		const r1 = await h.call("exec_command", { cmd: "sleep 1.2", yield_time_ms: 250, on_exit: "wake" });
 		const sid = r1.details.session_id;
 		const ac = new AbortController();
-		const inflight = h.call("write_stdin", { session_id: sid, yield_until: inFuture(60_000) }, ac.signal);
+		const inflight = h.call("write_stdin", { session_id: sid, yield_time_ms: 60_000 }, ac.signal);
 		setTimeout(() => ac.abort(), 150);
 		const r2 = await inflight;
 		assert.match(r2.details.wait_status, /^Follow the user's latest instruction before polling this session again\./);

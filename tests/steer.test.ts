@@ -232,7 +232,9 @@ describe("steer interrupt e2e", () => {
 	it("returns immediately when the steer was queued before the poll, then waits normally after delivery", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
-		const sid = await startLongJob(h);
+		const started = await h.call("exec_command", { cmd: "echo job-started; sleep 1.2", yield_time_ms: 300 });
+		const sid = started.details.session_id;
+		assert.equal(typeof sid, "number");
 		await h.steer();
 		await sleep(30); // let the gate confirm
 		const t0 = Date.now();
@@ -241,7 +243,9 @@ describe("steer interrupt e2e", () => {
 		assert.match(r.details.wait_status, /^Read and address the user's steering message first\./);
 
 		await h.deliver();
-		const r2 = await h.call("write_stdin", { session_id: sid, yield_until: new Date().toISOString() });
+		const r2 = await h.call("write_stdin", { session_id: sid, yield_time_ms: 5000 });
+		assert.equal(r2.details.running, false);
+		assert.equal(r2.details.exit_code, 0);
 		assert.equal(Object.hasOwn(r2.details, "wait_status"), false);
 	});
 
@@ -259,19 +263,6 @@ describe("steer interrupt e2e", () => {
 		assert.ok(Date.now() - t0 < 5000);
 		assert.match(ra.details.wait_status, /^Read and address the user's steering message first\./);
 		assert.match(rb.details.wait_status, /^Read and address the user's steering message first\./);
-	});
-
-	it("interrupts an absolute yield_until wait", async () => {
-		const h = makeHarness();
-		await h.emit("session_start");
-		const sid = await startLongJob(h);
-		setTimeout(() => void h.steer(), 150);
-		const r = await h.call("write_stdin", {
-			session_id: sid,
-			yield_until: new Date(Date.now() + 3_600_000).toISOString(),
-		});
-		assert.match(r.details.wait_status, /^Read and address the user's steering message first\./);
-		assert.equal(r.details.wait_mode, "absolute");
 	});
 
 	it("keeps an armed wake armed", async () => {
@@ -324,10 +315,14 @@ describe("steer interrupt e2e", () => {
 		try {
 			const h = makeHarness();
 			await h.emit("session_start");
-			const sid = await startLongJob(h);
+			const started = await h.call("exec_command", { cmd: "sleep 1.2", yield_time_ms: 300 });
+			const sid = started.details.session_id;
+			assert.equal(typeof sid, "number");
 			await h.steer();
 			await sleep(30);
-			const r = await h.call("write_stdin", { session_id: sid, yield_until: new Date().toISOString() });
+			const r = await h.call("write_stdin", { session_id: sid, yield_time_ms: 5000 });
+			assert.equal(r.details.running, false);
+			assert.equal(r.details.exit_code, 0);
 			assert.equal(Object.hasOwn(r.details, "wait_status"), false);
 		} finally {
 			delete process.env[STEER_INTERRUPT_ENV];

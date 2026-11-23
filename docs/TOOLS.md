@@ -25,11 +25,10 @@ Takes a `session_id` from `exec_command`. Omit input to poll, or send input befo
 | `chars` | Empty | Text and C-style escapes, written as UTF-8. |
 | `chars_b64` | Empty | Base64 for exact bytes. Use it instead of `chars`; malformed base64 is rejected. |
 | `yield_time_ms` | `250` with input; `5000` for an empty poll | With input, clamped to 250–30,000 ms. For an empty poll the minimum is 5000 ms and there is no built-in maximum. Supply a finite non-negative duration within `Number.MAX_SAFE_INTEGER`; fractions round down. |
-| `yield_until` | Unset | Absolute deadline for an empty poll. Supply a UTC date and time ending in `Z`, with seconds and optional milliseconds. Omit `yield_time_ms`. A past deadline polls immediately; validation errors include `current_utc_time`. |
 
 ### Waiting and cancellation
 
-- A yield or deadline ends the current wait and leaves the process running. Choose a finite relative duration that fits the job. Use `yield_until` only when the human requests a specific deadline for a finite, non-interactive job. Use short relative polls for REPLs, dev servers, and other ongoing or interactive work.
+- Reaching `yield_time_ms` ends the current wait and leaves the process running. Choose a finite duration that fits the job. Use short polls for REPLs, dev servers, and other ongoing or interactive work.
 - Esc cancels the wait without killing the child. An empty poll keeps its buffered output available for the next call.
 - A human steer (including RPC `steer`) returns early, drains output so far, and leaves the child alive. `wait_status` tells the model to read and address the steering message first, then poll again only if the session is still relevant. Nested Codemode calls throw while a steer is queued so a script can stop polling. Follow-ups and extension-generated steers do not trigger this behavior.
 - `wait_status` is optional and gives plain-language next steps only for cancellation and steering. Normal completion and reached deadlines omit the field from tool replies and structured results. Scripts use `running` and `exit_code` to inspect process state.
@@ -73,6 +72,6 @@ The `--keep-builtin-bash` flag opts out of replacing Pi's built-in `bash` tool.
 | Environment variable | Effect |
 | --- | --- |
 | `PI_UNIFIED_EXEC_BASH` | Override Git Bash discovery on Windows. The default searches PATH and common Git installations before falling back to PowerShell. |
-| `PI_UNIFIED_EXEC_MAX_EMPTY_POLL_MS` | Limit empty relative polls. Unset or blank means no cap. Values must be positive, finite, and within `Number.MAX_SAFE_INTEGER`; fractions round down and values below 5000 become 5000. Polls above the cap fail. Absolute deadlines are unaffected. |
+| `PI_UNIFIED_EXEC_MAX_EMPTY_POLL_MS` | Limit empty polls. Unset or blank means no cap. Values must be positive, finite, and within `Number.MAX_SAFE_INTEGER`; fractions round down and values below 5000 become 5000. Polls above the cap fail. |
 | `PI_UNIFIED_EXEC_STEER_INTERRUPT=0` | Leave waits attached when a human steers. |
 | `PI_UNIFIED_EXEC_COMPACT_CODEMODE=0` | Use the native Codemode rendering. |

@@ -1,5 +1,5 @@
 /**
- * Unit tests for the event-driven absolute wait (src/long-wait.ts).
+ * Unit tests for event-driven waits (src/long-wait.ts).
  * Uses injected monotonic clocks / timers where determinism matters; real
  * waits are all sub-second.
  */
@@ -26,7 +26,7 @@ describe("waitForExitOrDeadline", () => {
 		);
 	});
 
-	it("returns 'deadline' immediately for a non-positive duration (past yield_until)", async () => {
+	it("returns 'deadline' immediately for a non-positive duration", async () => {
 		const exited = new AbortController();
 		assert.equal(await waitForExitOrDeadline({ exited: exited.signal, durationMs: 0 }), "deadline");
 		assert.equal(await waitForExitOrDeadline({ exited: exited.signal, durationMs: -100 }), "deadline");

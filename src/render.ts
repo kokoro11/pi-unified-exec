@@ -23,7 +23,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Container, Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
 
-import { formatDurationSeconds, formatRemainingLater, formatWallTime } from "./format-time.ts";
+import { formatDurationSeconds, formatWallTime } from "./format-time.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
 import { type KillResultDetails, type OutputResultDetails, type ProcessResultDetails, WAIT_CANCELLED, WAIT_STEERED } from "./tool-result.ts";
 
@@ -59,7 +59,6 @@ interface DetailsShape extends Partial<OutputResultDetails> {
 	escalated?: boolean;
 	total_time_seconds?: number;
 	yield_time_ms?: number;
-	yield_until?: string;
 	wait_status?: string;
 	completion_notification?: string;
 	wake_armed?: boolean;
@@ -91,14 +90,6 @@ function markStarted(state: RenderState, executionStarted: boolean): void {
 		state.startedAt = Date.now();
 		state.endedAt = undefined;
 	}
-}
-
-/** `until <ISO> · 2h40m later`; unparseable timestamps show only the raw value. */
-function formatUntilLabel(yieldUntil: string, nowMs: number = Date.now()): string {
-	const safeYieldUntil = safeOneLine(yieldUntil);
-	const targetMs = Date.parse(safeYieldUntil);
-	if (!Number.isFinite(targetMs)) return `until ${safeYieldUntil}`;
-	return `until ${safeYieldUntil} · ${formatRemainingLater(targetMs - nowMs)}`;
 }
 
 /** Shorten `$HOME/foo/bar` → `~/foo/bar`; otherwise return as-is. */
@@ -149,7 +140,7 @@ export function renderExecCommandCall(
 }
 
 export function renderWriteStdinCall(
-	args: { session_id?: number; chars?: string; chars_b64?: string; yield_time_ms?: number; yield_until?: string },
+	args: { session_id?: number; chars?: string; chars_b64?: string; yield_time_ms?: number },
 	theme: Theme,
 	context: ToolRenderContext<RenderState, typeof args>,
 ): Component {
@@ -165,11 +156,9 @@ export function renderWriteStdinCall(
 		: chars.length > 0
 			? theme.fg("toolTitle", theme.bold(`» ${stringifyChars(chars)}`))
 			: theme.fg("toolTitle", theme.bold(`» (base64, ${base64ByteLength(b64)} bytes)`));
-	const yieldSuffix = args?.yield_until
-		? theme.fg("muted", ` (${formatUntilLabel(args.yield_until)})`)
-		: args?.yield_time_ms
-			? theme.fg("muted", ` (yield ${(args.yield_time_ms / 1000).toFixed(1)}s)`)
-			: "";
+	const yieldSuffix = args?.yield_time_ms
+		? theme.fg("muted", ` (yield ${(args.yield_time_ms / 1000).toFixed(1)}s)`)
+		: "";
 	const banner = `${op} ${theme.fg("muted", `→ session_id=${sid}`)}${yieldSuffix}`;
 
 	const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
@@ -404,9 +393,6 @@ function buildStatusLine(
 	}
 
 	if (details.failure_message) bits.push(theme.fg("error", `failure: ${safeOneLine(details.failure_message)}`));
-	if (details.yield_until && (options.isPartial || details.running)) {
-		bits.push(formatUntilLabel(details.yield_until));
-	}
 	if (details.wait_status === WAIT_CANCELLED) bits.push(theme.fg("warning", "cancelled"));
 	if (details.wait_status === WAIT_STEERED) bits.push(theme.fg("accent", "steered"));
 	if (details.completion_notification === "armed") bits.push("wake armed");

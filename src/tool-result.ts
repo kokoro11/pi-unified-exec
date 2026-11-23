@@ -53,10 +53,8 @@ export interface ProcessResultDetails extends OutputResultDetails {
 	/** Lifetime of the session in seconds, reported by write_stdin. */
 	total_time_seconds?: number;
 	yield_time_ms?: number;
-	wait_mode?: "relative" | "absolute";
 	/** Plain-language guidance present only when a wait is cancelled or steered. */
 	wait_status?: string;
-	yield_until?: string;
 	effective_wait_ms?: number;
 	on_exit?: OnExitPolicy;
 	completion_notification?: "armed";

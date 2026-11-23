@@ -4,7 +4,7 @@
  *
  * Tools exposed to the LLM:
  *   - exec_command(cmd, workdir?, shell?, tty?, yield_time_ms?, on_exit?)
- *   - write_stdin(session_id, chars?, yield_time_ms?, yield_until?)
+ *   - write_stdin(session_id, chars?, yield_time_ms?)
  *   - set_on_exit(session_id, on_exit)            [disarm/re-arm wake without kill]
  *   - kill_session(session_id, signal?)          [pi-flavor; codex has no equivalent]
  *   - list_sessions()                            [pi-flavor]
@@ -70,7 +70,7 @@ import {
 	steerInterruptEnabled,
 } from "./steer-gate.ts";
 import { buildShellCommand, IS_WINDOWS, resolveDefaultShell, resolveWindowsShell } from "./shell.ts";
-import { MIN_EMPTY_YIELD_TIME_MS, nowUtcIso, parseYieldUntil, resolveEmptyPollYield } from "./time.ts";
+import { MIN_EMPTY_YIELD_TIME_MS, resolveEmptyPollYield } from "./time.ts";
 export { MAX_EMPTY_POLL_ENV_VAR, resolveMaxEmptyPollMs } from "./time.ts";
 import {
 	finalizeKillResult,
@@ -192,7 +192,6 @@ type WriteStdinArgs = {
 	chars?: string;
 	chars_b64?: string;
 	yield_time_ms?: number;
-	yield_until?: string;
 };
 
 /**
@@ -466,29 +465,8 @@ async function runWriteStdin(
 		finalizeProcessResult({ ...input, operation: "write_stdin", sessionId: session.id });
 	const writeBytes = resolveWriteInput(args);
 	const isEmptyPoll = writeBytes === undefined || writeBytes.length === 0;
-	const yieldUntil = args.yield_until;
-
-	// Relative durations and absolute UTC deadlines are mutually exclusive.
-	if (yieldUntil !== undefined && args.yield_time_ms !== undefined) {
-		throw new Error(
-			`write_stdin: pass either yield_time_ms (relative wait) or ` +
-				`yield_until (absolute UTC deadline), not both. current_utc_time: ${nowUtcIso()}`,
-		);
-	}
-	// `yield_until` is only valid for an empty poll (no input bytes).
-	if (yieldUntil !== undefined && !isEmptyPoll) {
-		throw new Error(
-			`write_stdin: yield_until is only valid for an empty poll (no non-empty chars or chars_b64). ` +
-				`Send the input with a relative yield_time_ms first, then follow up with an empty yield_until poll. ` +
-				`current_utc_time: ${nowUtcIso()}`,
-		);
-	}
 	if (isEmptyPoll) {
-		const parsed = yieldUntil === undefined ? undefined : parseYieldUntil(yieldUntil, Date.now());
-		const wait: EmptyWait = parsed
-			? { mode: "absolute", durationMs: parsed.remainingMs, yieldUntil: parsed.normalized }
-			: { mode: "relative", durationMs: resolveEmptyPollYield(args.yield_time_ms) };
-		return runAttachedWait(ctx, session, wait, signal, steerSignal, onUpdate, toolCallId);
+		return runAttachedWait(ctx, session, resolveEmptyPollYield(args.yield_time_ms), signal, steerSignal, onUpdate, toolCallId);
 	}
 
 	const yieldTimeMs = clampYield(args.yield_time_ms, DEFAULT_WRITE_STDIN_YIELD_MS);
@@ -527,9 +505,7 @@ async function runWriteStdin(
 					cwd: session.cwd,
 					command: session.displayCommand,
 					yieldTimeMs,
-					// This path is only reachable for input writes (never an empty
-					// poll), so no wait_mode is reported — just direct delivery.
-					extra: terminalWaitExtra(undefined, armed),
+					extra: terminalWaitExtra(armed),
 				});
 			}
 			// Give the child a small window to react before the poll.
@@ -563,7 +539,7 @@ async function runWriteStdin(
 				cwd: session.cwd,
 				command: session.displayCommand,
 				yieldTimeMs,
-				extra: terminalWaitExtra(undefined, armed),
+				extra: terminalWaitExtra(armed),
 			});
 		}
 		// Still running: release the lease WITHOUT marking observed — the wake
@@ -597,36 +573,25 @@ async function runWriteStdin(
 }
 
 /** Shared "exited" extra fields for direct terminal delivery. */
-function terminalWaitExtra(
-	waitMode: "relative" | "absolute" | undefined,
-	wakeWasArmed: boolean,
-): Partial<ResponseShape> {
+function terminalWaitExtra(wakeWasArmed: boolean): Partial<ResponseShape> {
 	return {
-		wait_mode: waitMode,
 		completion_delivery: "direct",
 		...(wakeWasArmed ? { on_exit: "wake" as const, on_exit_wake: "consumed" as const } : {}),
 	};
 }
 
-type EmptyWait =
-	| { mode: "relative"; durationMs: number }
-	| { mode: "absolute"; durationMs: number; yieldUntil: string };
-
-/** Both empty-poll forms retain bounded output in the session, not in the wait. */
+/** Empty polls retain bounded output in the session, not in the wait. */
 async function runAttachedWait(
 	ctx: ExtensionCtx,
 	session: ExecSession,
-	wait: EmptyWait,
+	durationMs: number,
 	signal: AbortSignal | undefined,
 	steerSignal: AbortSignal | undefined,
 	onUpdate: AgentToolUpdateCallback<ProcessUpdateDetails> | undefined,
 	toolCallId: string,
 ): Promise<ResponseShape> {
 	const startedAt = performance.now();
-	const waitFields: Partial<ResponseShape> =
-		wait.mode === "absolute"
-			? { wait_mode: wait.mode, yield_until: wait.yieldUntil }
-			: { wait_mode: wait.mode, yield_time_ms: wait.durationMs };
+	const waitFields: Partial<ResponseShape> = { yield_time_ms: durationMs };
 	session.touch();
 	ctx.coordinator.beginObservation(session.id, toolCallId);
 	let pendingTerminal = false;
@@ -635,7 +600,7 @@ async function runAttachedWait(
 		if (onUpdate) {
 			streamer = startRateLimitedStream({
 				outputNotify: session.outputNotify,
-				minIntervalMs: wait.mode === "relative" && wait.durationMs <= MAX_YIELD_TIME_MS
+				minIntervalMs: durationMs <= MAX_YIELD_TIME_MS
 					? OUTPUT_POLL_INTERVAL_MS : LONG_WAIT_UPDATE_INTERVAL_MS,
 				emit: () => onUpdate(buildStreamUpdate(session, waitFields)),
 			});
@@ -644,7 +609,7 @@ async function runAttachedWait(
 			exited: session.exited,
 			externalAbort: signal,
 			steerAbort: steerSignal,
-			durationMs: wait.durationMs,
+			durationMs,
 		});
 		// Exit wins close races. A cancelled live wait never drains output; a
 		// steered one drains like a reached deadline (the session stays live).
@@ -659,7 +624,7 @@ async function runAttachedWait(
 		const elapsedMs = performance.now() - startedAt;
 		const extra: Partial<ResponseShape> = { ...waitFields };
 		if (outcome === "exit") {
-			Object.assign(extra, terminalWaitExtra(wait.mode, armed));
+			Object.assign(extra, terminalWaitExtra(armed));
 		} else {
 			if (outcome === "cancelled") extra.wait_status = WAIT_CANCELLED;
 			else if (outcome === "steered") extra.wait_status = WAIT_STEERED;
@@ -844,7 +809,7 @@ function clearSessionExitWatchers(ctx: ExtensionCtx): void {
 	ctx.exitUnsubscribers.clear();
 }
 
-/** Shared streaming-update payload (relative polls and absolute waits). */
+/** Shared streaming-update payload for attached waits. */
 function buildStreamUpdate(
 	session: ExecSession,
 	extra?: Partial<ProcessResultDetails>,
@@ -1159,10 +1124,9 @@ export default function (pi: ExtensionAPI) {
 		name: "write_stdin",
 		label: "write_stdin",
 		description:
-			"Write bytes to a running session. Omit both chars and chars_b64 to poll without writing. Use `chars` for text with C-style escapes (e.g. \\x03 Ctrl-C, \\x1b ESC, \\n newline); use `chars_b64` for raw binary. For empty polls, wait with a finite yield_time_ms (relative, no built-in maximum) or yield_until (absolute UTC deadline, only when the human explicitly asks). The reply keeps the session ID at exit; only poll again if it reports `[running #N]`.",
+			"Write bytes to a running session. Omit both chars and chars_b64 to poll without writing. Use `chars` for text with C-style escapes (e.g. \\x03 Ctrl-C, \\x1b ESC, \\n newline); use `chars_b64` for raw binary. For empty polls, wait with a finite yield_time_ms (relative, no built-in maximum). The reply keeps the session ID at exit; only poll again if it reports `[running #N]`.",
 		promptSnippet: "Send input, poll a session, or collect its exit result",
 		promptGuidelines: [
-			"write_stdin: Don't use yield_time_ms and yield_until at the same time. Use yield_until only when the user requests a specific time.",
 			"Don't use chars and chars_b64 at the same time.",
 			'on_exit wake is set via exec_command or set_on_exit, not write_stdin. Observing an exit here consumes an armed wake (direct result). To disarm wake without killing, call set_on_exit(session_id, on_exit: "none").',
 			"In tty sessions, submit lines with \\r (the Enter key) rather than \\n: POSIX terminals accept both, but Windows console programs only execute input on \\r.",
@@ -1186,13 +1150,7 @@ export default function (pi: ExtensionAPI) {
 			),
 			yield_time_ms: Type.Optional(
 				Type.Number({
-					description: `Attachment window, same as exec_command. When input exists: default is ${DEFAULT_WRITE_STDIN_YIELD_MS}, clamped to [${MIN_YIELD_TIME_MS}, ${MAX_YIELD_TIME_MS}]. Otherwise, default/minimum is ${MIN_EMPTY_YIELD_TIME_MS}, no built-in maximum. Mutually exclusive with yield_until.`,
-				}),
-			),
-			yield_until: Type.Optional(
-				Type.String({
-					description:
-						'Absolute UTC deadline to stay attached to an EMPTY poll, as strict RFC 3339 UTC ("2026-07-21T18:30:00Z"). Only when the human explicitly asks for a long attached wait. Returns immediately when the process exits. Mutually exclusive with yield_time_ms.',
+					description: `Attachment window, same as exec_command. When input exists: default is ${DEFAULT_WRITE_STDIN_YIELD_MS}, clamped to [${MIN_YIELD_TIME_MS}, ${MAX_YIELD_TIME_MS}]. Otherwise, default/minimum is ${MIN_EMPTY_YIELD_TIME_MS}, no built-in maximum.`,
 				}),
 			),
 		}),

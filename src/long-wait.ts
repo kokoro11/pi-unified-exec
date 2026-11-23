@@ -1,5 +1,5 @@
 /**
- * Event-driven wait for both relative and absolute empty `write_stdin` polls.
+ * Event-driven wait for empty `write_stdin` polls.
  *
  * Unlike collectOutputUntilDeadline, this wait never accumulates drained
  * output in a per-call array. A long noisy process retains bounded output:
@@ -8,17 +8,15 @@
  *   - never drains process output (the session's HeadTailBuffer keeps its
  *     bounded head/tail retention, the rolling UI tail keeps rolling, and the
  *     log file keeps receiving every byte);
- *   - runs on a MONOTONIC clock: the wall-clock deadline is converted once
- *     into a duration by the caller, then anchored to `performance.now()`
- *     here, so a later NTP adjustment or manual system-clock change cannot
- *     lengthen or shorten an in-progress wait.
+ *   - measures elapsed time with `performance.now()`, so system-clock
+ *     changes cannot lengthen or shorten an in-progress wait.
  */
 
 export type LongWaitOutcome = "exit" | "deadline" | "cancelled" | "steered";
 
 /**
  * Max single setTimeout arm. Values above ~2^31-1 overflow and fire early;
- * multi-day yield_until waits re-arm in chunks of this size instead.
+ * multi-day waits re-arm in chunks of this size instead.
  */
 export const MAX_TIMER_ARM_MS = 2_147_483_647; // 2^31 - 1
 
@@ -29,7 +27,7 @@ export interface LongWaitInputs {
 	externalAbort?: AbortSignal;
 	/** A human steer is queued (src/steer-gate.ts). Ends the wait like an early deadline. */
 	steerAbort?: AbortSignal;
-	/** Validated duration in ms; absolute callers compute it once from wall time. */
+	/** Validated duration in ms. */
 	durationMs: number;
 	/** Injectable monotonic clock (default: performance.now). Test hook. */
 	monotonicNow?: () => number;
