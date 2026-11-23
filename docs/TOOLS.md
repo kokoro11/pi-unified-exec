@@ -51,9 +51,11 @@ Use `chars_hex` to write arbitrary bytes, including values above `0x7F`. Both `1
 | Tool | Parameters | Result |
 | --- | --- | --- |
 | `kill_session` | `session_id`, optional `signal` (default `SIGTERM`) | Suppress a pending wake and stop the child. On POSIX, escalate to `SIGKILL` after two seconds as needed. On Windows, force-terminate the session's Job Object, including descendants whose parents have exited. An unconfirmed kill leaves the session registered. |
-| `list_sessions` | None | Include `session_id`, `running`, and `wake_armed`, plus `on_exit` and `log` when applicable. Report each unobserved exit once, then remove it from the list. |
+| `list_sessions` | None | Include `session_id`, `running`, and `wake_armed`, plus `on_exit` and `log` when applicable. Exited sessions stay listed until their final output is collected or the session is evicted. |
 
 `kill_session` reports `[killed #N]` or `[kill failed #N]`. For a known session, `total_time` covers its lifetime from launch and stops at exit; `wall_time` measures the kill call. The text shows a PID only while the session remains running, and reports `escalated` only when true. A missing session reports `[kill failed #N]` with a failure message and omits its unknown lifetime.
+
+When a new exit is waiting for collection, the next `exec_command`, `write_stdin`, or `kill_session` reply adds `note: Remember to poll and collect output of #N, ...`. It lists every exit still available, including exits mentioned earlier. The note repeats only when another uncollected exit is waiting. `list_sessions` neither adds the note nor clears it. In Codemode, successful tool replies also expose it as `details.note`.
 
 A wake sends a follow-up with exit metadata and a log number when available. A successful poll or listing that reports the exit consumes a pending wake. A deadline, steer, or cancellation keeps it armed. To disarm promptly, call `write_stdin` with the session ID and `on_exit: "none"`.
 

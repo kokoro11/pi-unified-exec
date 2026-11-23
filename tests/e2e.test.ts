@@ -1047,25 +1047,77 @@ describe("unified-exec e2e", () => {
 		await h.emit("session_shutdown");
 	});
 
-	it("list_sessions reports just-exited sessions once with exit info, then removes them", async () => {
+	it("listing exited sessions preserves their final output for write_stdin", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
-		const r1 = await h.call("exec_command", { cmd: "sleep 0.3", yield_time_ms: 250 });
-		const sid = r1.details.session_id;
-		assert.ok(typeof sid === "number", JSON.stringify(r1.details));
-		await new Promise((r) => setTimeout(r, 600));
+		try {
+			const started = await h.call("exec_command", { cmd: "printf 'final output\\n'", yield_time_ms: 0 });
+			const sid = started.details.session_id;
+			assert.equal(typeof sid, "number");
+			assert.ok(await waitFor(async () => (await h.call("list_sessions", {})).details.just_exited_count === 1));
 
-		const l1 = await h.call("list_sessions", {});
-		assert.equal(l1.details.active_count, 0, JSON.stringify(l1.details));
-		const entry = l1.details.sessions.find((s: any) => s.session_id === sid);
-		assert.ok(entry, `exited session should be reported once: ${JSON.stringify(l1.details)}`);
-		assert.equal(entry.running, false);
-		assert.equal(entry.exit_code, 0);
-		assert.ok(l1.content[0].text.includes("exited"), l1.content[0].text);
+			await h.invokeCommand("unified-exec-sessions");
+			const listed = await h.call("list_sessions", {});
+			assert.equal(listed.details.active_count, 0);
+			const [entry] = listed.structuredContent!.sessions;
+			assert.equal(entry.session_id, sid);
+			assert.equal(entry.running, false);
+			assert.equal(entry.exit_code, 0);
+			assert.match(listed.content[0].text, /output available via write_stdin/);
 
-		const l2 = await h.call("list_sessions", {});
-		assert.equal(l2.details.sessions.length, 0, JSON.stringify(l2.details));
-		await h.emit("session_shutdown");
+			const collected = await h.call("write_stdin", { session_id: sid, yield_time_ms: 0 });
+			assert.equal(collected.details.running, false);
+			assert.equal(collected.details.output, "final output\n");
+			assert.equal(collected.details.note, undefined);
+			assert.equal((await h.call("list_sessions", {})).details.sessions.length, 0);
+		} finally {
+			await h.emit("session_shutdown");
+		}
+	});
+
+	it("a new uncollected exit reminds the next non-list result about every pending exit", async () => {
+		const h = makeHarness();
+		await h.emit("session_start");
+		const exitInBackground = async () => {
+			const started = await h.call("exec_command", { cmd: "exit 0", yield_time_ms: 0 });
+			const sid = started.details.session_id;
+			assert.equal(typeof sid, "number");
+			assert.equal(started.details.note, undefined);
+			assert.ok(await waitFor(async () => {
+				const listed = await h.call("list_sessions", {});
+				assert.doesNotMatch(listed.content[0].text, /Remember to poll/);
+				assert.equal(listed.structuredContent!.note, undefined);
+				return listed.details.sessions.some((s: any) => s.session_id === sid && !s.running);
+			}));
+			return sid;
+		};
+		const assertReminder = (reply: Awaited<ReturnType<typeof h.call>>, ids: number[]) => {
+			const note = `Remember to poll and collect output of ${ids.map((id) => `#${id}`).join(", ")}`;
+			assert.equal(reply.details.note, note);
+			assert.equal(reply.structuredContent!.details.note, note);
+			assert.ok(reply.content[0].text.split("\n").includes(`note: ${note}`));
+		};
+		try {
+			const first = await exitInBackground();
+			const command = await h.call("exec_command", { cmd: "exit 0" });
+			assertReminder(command, [first]);
+			assert.equal((await h.call("kill_session", { session_id: 999 })).details.note, undefined);
+
+			const second = await exitInBackground();
+			assertReminder(await h.call("kill_session", { session_id: 999 }), [first, second]);
+
+			const third = await exitInBackground();
+			const collected = await h.call("write_stdin", { session_id: first, yield_time_ms: 0 });
+			assertReminder(collected, [second, third]);
+
+			const fourth = await exitInBackground();
+			const killed = await h.call("kill_session", { session_id: third });
+			assertReminder(killed, [second, fourth]);
+			assert.equal((await h.call("write_stdin", { session_id: second, yield_time_ms: 0 })).details.note, undefined);
+			assert.equal((await h.call("write_stdin", { session_id: fourth, yield_time_ms: 0 })).details.note, undefined);
+		} finally {
+			await h.emit("session_shutdown");
+		}
 	});
 
 	it("session_shutdown SIGKILLs children that trap SIGTERM", async () => {

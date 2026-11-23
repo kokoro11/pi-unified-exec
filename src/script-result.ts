@@ -43,6 +43,7 @@ const outputFields = {
 	exit_code: Type.Optional(Type.Number({ description: "Exit code once the process has exited." })),
 	signal: Type.Optional(Type.String({ description: "Signal that terminated the process, if any." })),
 	failure_message: Type.Optional(Type.String()),
+	note: Type.Optional(Type.String()),
 	log: logSchema,
 	wall_time_seconds: Type.Number(),
 };
@@ -51,7 +52,6 @@ const processScriptDetailFields = {
 	status: Type.Union([Type.Literal("running"), Type.Literal("exited")]),
 	running: Type.Boolean(),
 	...outputFields,
-	note: Type.Optional(Type.String()),
 	wait_status: Type.Optional(Type.String({ description: "Plain-language guidance present only when a wait is cancelled or steered." })),
 };
 
@@ -88,6 +88,7 @@ function scriptOutputDetails(shape: OutputResultDetails) {
 		exit_code: shape.exit_code,
 		signal: optionalMeta(shape.signal),
 		failure_message: optionalMeta(shape.failure_message),
+		note: optionalMeta(shape.note),
 		log: shape.log,
 		wall_time_seconds: shape.wall_time_seconds,
 	};
@@ -99,7 +100,6 @@ function processScriptResult<T extends Record<string, unknown>>(shape: ProcessRe
 			status: shape.status,
 			running: shape.running,
 		}, scriptOutputDetails(shape), {
-			note: optionalMeta(shape.note),
 			wait_status: shape.wait_status,
 		}, fields)),
 		text: renderProcessResultText(shape),
@@ -157,11 +157,12 @@ export function killScriptResult(shape: KillResultDetails): KillScriptResult {
 	};
 }
 
-export function killNotFoundScriptResult(sessionId: number): KillScriptResult {
+export function killNotFoundScriptResult(sessionId: number, note?: string): KillScriptResult {
 	const failure = `No such session: ${sessionId}`;
+	const safeNote = optionalMeta(note);
 	return {
-		details: {
-			status: "kill_failed",
+		details: compact({
+			status: "kill_failed" as const,
 			found: false,
 			running: false,
 			escalated: false,
@@ -170,8 +171,9 @@ export function killNotFoundScriptResult(sessionId: number): KillScriptResult {
 			truncated: false,
 			wall_time_seconds: 0,
 			failure_message: failure,
-		},
-		text: `[kill failed #${sessionId}]\nfailure: ${failure}`,
+			note: safeNote,
+		}),
+		text: `[kill failed #${sessionId}]\nfailure: ${failure}${safeNote ? `\nnote: ${safeNote}` : ""}`,
 	};
 }
 
@@ -184,7 +186,7 @@ export const listSessionsScriptResultSchema = Type.Object({
 			tty: Type.Boolean(),
 			pid: Type.Optional(Type.Number()),
 			elapsed_ms: Type.Number(),
-			running: Type.Boolean({ description: "False for sessions that just exited; they are removed after this listing." }),
+			running: Type.Boolean({ description: "False for exited sessions whose output can still be collected with write_stdin." }),
 			on_exit: onExitSchema,
 			wake_armed: Type.Boolean(),
 			exit_code: Type.Optional(Type.Number()),
@@ -193,7 +195,7 @@ export const listSessionsScriptResultSchema = Type.Object({
 		}),
 	),
 	active_count: Type.Number(),
-	just_exited_count: Type.Number(),
+	just_exited_count: Type.Number({ description: "Number of exited sessions still available for collection." }),
 });
 export type ListSessionsScriptResult = Static<typeof listSessionsScriptResultSchema>;
 

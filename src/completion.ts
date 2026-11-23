@@ -301,8 +301,7 @@ export class CompletionCoordinator {
 	/**
 	 * list_sessions (or another status read) reported terminal completion.
 	 * If the wake was not yet queued, that report counts as direct observation
-	 * and suppresses the wake; if a wake was already queued/sent, the session
-	 * may be reaped without generating another notification.
+	 * and suppresses the wake. Listing does not collect the final output.
 	 */
 	observeViaListing(sessionId: number): void {
 		const r = this.records.get(sessionId);

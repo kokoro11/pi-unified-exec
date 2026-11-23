@@ -129,7 +129,14 @@ const textEncoder = new TextEncoder();
 
 type ProcessUpdateDetails = Partial<ProcessResultDetails> & { pid?: number; total_bytes?: number };
 
-function textToolResult<Details, Structured extends { text: string }>(details: Details, structuredContent: Structured) {
+function sessionToolResult<Details, Structured extends { text: string }>(
+	store: SessionStore,
+	details: Details & { note?: string },
+	format: (details: Details & { note?: string }) => Structured,
+) {
+	const reminder = store.takeExitReminder();
+	if (reminder) details.note = details.note ? `${reminder}. ${details.note}` : reminder;
+	const structuredContent = format(details);
 	return {
 		content: [{ type: "text" as const, text: structuredContent.text }],
 		details,
@@ -337,11 +344,7 @@ async function runExecCommand(
 		if (count >= WARNING_SESSIONS) {
 			ctx.sessionUi.ui?.notify(`unified-exec: ${count}/${ctx.store.maxSessions} sessions open`, "warning");
 		}
-		// Note: sessions stay in the store until a later tool call observes the
-		// exit: write_stdin returns the final exit_code/output, and list_sessions
-		// reports exited sessions one last time (with exit info) before removing
-		// them. Matches codex's lazy-drain so exit information is never silently
-		// lost across turns.
+		// Keep exited sessions available until their final output is collected.
 
 		// Wait until the yield deadline (or abort/exit). Stream updates meanwhile.
 		const collected = await collectAttachedOutput(
@@ -771,6 +774,12 @@ export default function (pi: ExtensionAPI) {
 	pi.on("tool_execution_end", async (event) => {
 		ctx.coordinator.handleToolExecutionEnd(event.toolCallId, event.isError === true);
 	});
+	pi.on("tool_result", (event) => {
+		if (!event.isError || event.structuredContent !== undefined) return;
+		if (event.toolName !== "exec_command" && event.toolName !== "write_stdin" && event.toolName !== "kill_session") return;
+		const note = ctx.store.takeExitReminder();
+		if (note) return { content: [...event.content, { type: "text", text: `note: ${note}` }] };
+	});
 	pi.on("agent_settled", async () => {
 		ctx.steer.reset();
 		ctx.coordinator.flushPending();
@@ -862,10 +871,6 @@ export default function (pi: ExtensionAPI) {
 		description: "List live unified-exec sessions and optionally kill one (or all)",
 		handler: async (_args, cmdCtx) => {
 			ctx.sessionUi.ui = cmdCtx.ui;
-			// Reap silently-exited sessions first so the picker only shows live ones.
-			for (const s of ctx.store.values()) {
-				if (s.hasExited) removeSession(ctx, s.id);
-			}
 			const targets = await ctx.sessionUi.pickKillTargets(cmdCtx.ui);
 			if (!targets) return;
 			let killed = 0;
@@ -935,7 +940,7 @@ export default function (pi: ExtensionAPI) {
 			const steerSignal = steerSignalFor(ctx, toolCallId, eventCtx);
 			const shape = await runExecCommand(ctx, params, signal, steerSignal, onUpdate, eventCtx.cwd);
 			ctx.sessionUi.refresh();
-			return textToolResult(shape, execCommandScriptResult(shape));
+			return sessionToolResult(ctx.store, shape, execCommandScriptResult);
 		},
 		renderCall: renderExecCommandCall,
 		renderResult: renderProcessResult,
@@ -949,7 +954,7 @@ export default function (pi: ExtensionAPI) {
 		promptSnippet: "Send input, poll or collect output, or change a session's wake policy",
 		promptGuidelines: [
 			"write_stdin: Don't use chars and chars_hex at the same time.",
-			"write_stdin: Don't poll a session you already saw exited.",
+			"write_stdin: Don't poll again after collecting a session's final output. You can still collect an exit shown by list_sessions.",
 			'write_stdin: Only set on_exit to "wake" when the human asks for auto-resume. To disarm a pending wake promptly, use on_exit: "none" with just the session ID. An exit collected by a poll consumes its wake.',
 			"write_stdin: In tty sessions, submit lines with \\r (the Enter key) rather than \\n: POSIX terminals accept both, but Windows console programs only execute input on \\r.",
 			"exec_command & write_stdin: For very noisy jobs, rely on the log and final/truncated output instead of repeatedly polling.",
@@ -986,7 +991,7 @@ export default function (pi: ExtensionAPI) {
 			const steerSignal = steerSignalFor(ctx, toolCallId, eventCtx);
 			const shape = await runWriteStdin(ctx, params, signal, steerSignal, onUpdate, toolCallId);
 			ctx.sessionUi.refresh();
-			return textToolResult(shape, writeStdinScriptResult(shape));
+			return sessionToolResult(ctx.store, shape, writeStdinScriptResult);
 		},
 		renderCall: renderWriteStdinCall,
 		renderResult: renderProcessResult,
@@ -1012,13 +1017,13 @@ export default function (pi: ExtensionAPI) {
 			const startedAt = Date.now();
 			const outcome = await terminateSessionById(ctx, sid, initial);
 			if (!outcome) {
-				return textToolResult({
+				return sessionToolResult(ctx.store, {
 					operation: "kill_session",
 					status: "kill_failed",
 					running: false,
 					session_id: sid,
 					found: false,
-				} as const, killNotFoundScriptResult(sid));
+				} as const, (details) => killNotFoundScriptResult(sid, details.note));
 			}
 			const { session, escalated, collected, killed, onExit } = outcome;
 			ctx.sessionUi.refresh();
@@ -1050,7 +1055,7 @@ export default function (pi: ExtensionAPI) {
 				killed,
 				onExit,
 			});
-			return textToolResult(details, killScriptResult(details));
+			return sessionToolResult(ctx.store, details, killScriptResult);
 		},
 		renderCall: renderKillSessionCall,
 		renderResult: renderKillSessionResult,
@@ -1059,31 +1064,24 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "list_sessions",
 		label: "list_sessions",
-		description: "List live unified-exec sessions and unreported exits in this Pi run.",
-		promptSnippet: "List live sessions and unreported exits",
+		description: "List live unified-exec sessions and exits with output still available. Use write_stdin to collect final output.",
+		promptSnippet: "List live sessions and exits awaiting collection",
 		outputSchema: listSessionsScriptResultSchema,
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, eventCtx) {
 			ctx.sessionUi.ui ??= eventCtx.ui;
-			// Reap any sessions that have exited silently (e.g., completed between
-			// tool calls without anyone observing them) — but report each of them
-			// one final time with exit info instead of dropping them on the floor.
-			// This mirrors codex's `refresh_process_state` filter while preserving
-			// our "exit information is never silently lost" guarantee.
-			let justExited = 0;
+			let exited = 0;
 			const now = Date.now();
 			const sessions = ctx.store.values()
 				.sort((a, b) => a.id - b.id)
 				.map((s) => {
 					const running = !s.hasExited;
-					const wake = ctx.coordinator.onExitStatus(s);
-					const onExit = wake && !running ? "consumed" : wake;
 					if (!running) {
-						// Reporting terminal completion consumes any pending wake.
+						// Report the exit without draining or retiring the session.
 						ctx.coordinator.observeViaListing(s.id);
-						removeSession(ctx, s.id);
-						justExited++;
+						exited++;
 					}
+					const onExit = ctx.coordinator.onExitStatus(s);
 					return {
 						session_id: s.id,
 						command: s.displayCommand,
@@ -1091,7 +1089,7 @@ export default function (pi: ExtensionAPI) {
 						tty: s.tty,
 						pid: s.pid,
 						started_at_ms: s.startedAt,
-						elapsed_ms: now - s.startedAt,
+						elapsed_ms: running ? now - s.startedAt : s.totalTimeSeconds * 1000,
 						running,
 						...(onExit ? { on_exit: onExit } : {}),
 						wake_armed: ctx.coordinator.isArmed(s.id),
@@ -1102,22 +1100,22 @@ export default function (pi: ExtensionAPI) {
 					};
 				});
 			ctx.sessionUi.refresh();
-			const active = sessions.length - justExited;
+			const active = sessions.length - exited;
 			const lines = sessions.length
 				? sessions.map((s) => {
 						const exitedSuffix = s.running
 							? ""
-							: `  [exited${s.exit_code !== undefined && s.exit_code !== null ? ` exit_code=${s.exit_code}` : ""}${s.signal ? ` signal=${s.signal}` : ""}; removed from store]`;
+							: `  [exited${s.exit_code !== undefined && s.exit_code !== null ? ` exit_code=${s.exit_code}` : ""}${s.signal ? ` signal=${s.signal}` : ""}; output available via write_stdin]`;
 						const wake = s.on_exit ? `\n        on_exit: ${s.on_exit}` : "";
 						return `  ${String(s.session_id).padStart(3)}  pid=${String(s.pid ?? "?").padStart(6)}  ${
 							s.tty ? "tty" : "pipe"
 						}  ${formatElapsed(s.elapsed_ms).padStart(8)}  ${formatSessionCommand(s.command, 60)}${exitedSuffix}${wake}${s.log ? `\n        log: ${s.log}` : ""}`;
 					})
 				: ["  (no live sessions)"];
-			const header = justExited
-				? `unified-exec sessions (${active} live, ${justExited} just exited):`
+			const header = exited
+				? `unified-exec sessions (${active} live, ${exited} exited):`
 				: `unified-exec sessions (${active}):`;
-			const details = { sessions, active_count: active, just_exited_count: justExited };
+			const details = { sessions, active_count: active, just_exited_count: exited };
 			return {
 				content: [{ type: "text", text: `${header}\n${lines.join("\n")}` }],
 				details,

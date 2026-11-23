@@ -26,7 +26,7 @@ import { Container, Text, truncateToWidth, type Component } from "@earendil-work
 import type { OnExitPolicy, OnExitStatus } from "./completion.ts";
 import { formatElapsed, formatWallTime } from "./format-time.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
-import { type KillResultDetails, type OutputResultDetails, type ProcessResultDetails, WAIT_CANCELLED, WAIT_STEERED } from "./tool-result.ts";
+import { type KillResultDetails, type OutputResultDetails, type ProcessResultDetails, safeMeta, WAIT_CANCELLED, WAIT_STEERED } from "./tool-result.ts";
 import { hexByteLength } from "./unescape.ts";
 
 type ExportedRenderCall<TState> = NonNullable<ToolDefinition<any, any, TState>["renderCall"]>;
@@ -332,6 +332,7 @@ function rebuildOutputResult(
 
 	const status = buildStatusLine(details, options, theme, state);
 	if (status) container.addChild(new Text(`\n${status}`, 0, 0));
+	if (details.note) container.addChild(new Text(`\n${theme.fg("muted", `note: ${safeMeta(details.note)}`)}`, 0, 0));
 }
 
 function buildStatusLine(
@@ -407,8 +408,8 @@ export function renderListSessionsResult(
 	container.clear();
 	const sessions = details.sessions;
 	const active = details.active_count ?? sessions.filter((session) => session.running).length;
-	const justExited = details.just_exited_count ?? sessions.filter((session) => !session.running).length;
-	const summary = `${active} live${justExited ? ` · ${justExited} just exited` : ""}`;
+	const exited = details.just_exited_count ?? sessions.filter((session) => !session.running).length;
+	const summary = `${active} live${exited ? ` · ${exited} exited` : ""}`;
 	container.addChild(new Text(`\n${theme.fg("muted", summary)}`, 0, 0));
 
 	if (sessions.length === 0) {

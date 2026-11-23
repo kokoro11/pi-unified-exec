@@ -48,7 +48,7 @@ export interface OutputResultDetails {
 	truncation?: TruncationResult;
 	/** Middle bytes dropped by the in-memory retention cap before result truncation. */
 	omitted_bytes?: number;
-	/** Optional explanation of an unusual session state (e.g. shell exited but pipe held open). */
+	/** Output collection reminder or explanation of an unusual session state. */
 	note?: string;
 }
 
@@ -265,5 +265,6 @@ export function renderKillResultText(shape: KillResultDetails): string {
 	if (shape.escalated) lines.push("escalated: true");
 	if (shape.exit_code !== undefined) lines.push(`exit_code: ${shape.exit_code}`);
 	appendExitDiagnostics(lines, shape);
+	if (shape.note) lines.push(`note: ${safeMeta(shape.note)}`);
 	return finishOutputResult(lines, shape);
 }

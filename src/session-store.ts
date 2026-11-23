@@ -20,6 +20,7 @@ interface SessionStoreOptions {
 
 export class SessionStore {
 	private readonly sessions = new Map<number, ExecSession>();
+	private readonly remindedExits = new WeakSet<ExecSession>();
 	private nextId = 1;
 	readonly maxSessions: number;
 	private readonly lruProtectedCount: number;
@@ -50,6 +51,20 @@ export class SessionStore {
 		return running.sort((a, b) => a.id - b.id);
 	}
 
+	/** A new exit prompts a reminder for every exit still available to collect. */
+	takeExitReminder(): string | undefined {
+		for (const session of this.sessions.values()) {
+			if (!session.hasExited || this.remindedExits.has(session)) continue;
+			const pending: string[] = [];
+			for (const exited of this.sessions.values()) {
+				if (!exited.hasExited) continue;
+				pending.push(`#${exited.id}`);
+				this.remindedExits.add(exited);
+			}
+			return `Remember to poll and collect output of ${pending.join(", ")}`;
+		}
+	}
+
 	get size(): number {
 		return this.sessions.size;
 	}
@@ -64,7 +79,7 @@ export class SessionStore {
 		return { pruned, count: this.sessions.size };
 	}
 
-	/** Remove a session (e.g., when it exits). */
+	/** Retire a session after its final output is collected. */
 	remove(id: number): void {
 		this.sessions.delete(id);
 	}
