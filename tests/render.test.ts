@@ -80,9 +80,9 @@ describe("unified-exec renderers", () => {
 		assert.doesNotMatch(collapsedText, /\nline-1\n/);
 		assert.match(collapsedText, /earlier lines/);
 		assert.match(collapsedText.toLowerCase(), /to expand/);
-		assert.match(collapsedText, /\[killed #73\]/);
-		assert.match(collapsedText, /total 1\.5s/);
-		assert.doesNotMatch(collapsedText, /pid=777/);
+		assert.match(collapsedText, /killed session_id=73/);
+		assert.match(collapsedText, /pid=777/);
+		assert.doesNotMatch(collapsedText, /total 1\.5s/);
 		assert.match(collapsedText, / · log=73$/m);
 
 		const expanded = renderKillSessionResult(

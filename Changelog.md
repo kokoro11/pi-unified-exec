@@ -4,6 +4,7 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Restore the kill-session preview footer's status labels and PID display, and keep session lifetime in tool replies and Codemode results.
 - Wrap Codemode `kill_session` results in `{ details, text }`, remove the redundant `killed` field, and include the known PID and session lifetime. Put the session ID in kill reply headers, add `total_time`, hide stopped PIDs and false escalation flags, and use the same formatted reply in direct calls and Codemode.
 - On Windows, assign each command to a Job Object before starting the shell. Kill all job members even when intermediate processes have exited, so inherited pipes close and killed sessions leave the store. Apply the same ownership to pipe and PTY sessions, including shutdown, and preserve command handling of terminal Ctrl-C.
 - Prefix tool-specific Rules entries with their tool names and explicitly name the tools covered by shared rules. Document this convention in the development guide because Pi adds these rules without tool-name labels.
