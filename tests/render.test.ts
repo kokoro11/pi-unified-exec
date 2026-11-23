@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { beforeAll, describe, it } from "bun:test";
-import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
+import { initTheme, Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";
+import { sliceByColumn, stripTerminalSequences } from "@earendil-works/pi-tui";
 
 import {
 	renderKillSessionCall,
@@ -13,6 +14,8 @@ import {
 	finalizeProcessResult,
 	renderKillResultText,
 	renderProcessResultText,
+	WAIT_CANCELLED,
+	WAIT_STEERED,
 } from "../src/tool-result.ts";
 
 const encoder = new TextEncoder();
@@ -20,6 +23,21 @@ const plainTheme = {
 	fg: (_color: string, text: string) => text,
 	bold: (text: string) => text,
 } as Theme;
+
+// Use Pi's real color handling; only the tokens used by these footer fixtures are needed.
+const colorTheme = new Theme(
+	{
+		text: "#ffffff",
+		muted: "#808080",
+		error: "#ff0000",
+		success: "#00ff00",
+		warning: "#ffff00",
+		accent: "#00ffff",
+		thinkingXhigh: "#ffffff",
+	} as ConstructorParameters<typeof Theme>[0],
+	{ selectedBg: "#000000" } as ConstructorParameters<typeof Theme>[1],
+	"truecolor",
+);
 
 function rendered(component: { render(width: number): string[] }, width = 100): string {
 	return component
@@ -82,8 +100,8 @@ describe("unified-exec renderers", () => {
 		assert.match(collapsedText.toLowerCase(), /to expand/);
 		assert.match(collapsedText, /killed session_id=73/);
 		assert.match(collapsedText, /pid=777/);
-		assert.doesNotMatch(collapsedText, /total 1\.5s/);
-		assert.match(collapsedText, / · log=73$/m);
+		assert.match(collapsedText, /total 1\.5s/);
+		assert.match(collapsedText, / ·\s+log=73$/m);
 
 		const expanded = renderKillSessionResult(
 			result,
@@ -106,6 +124,72 @@ describe("unified-exec renderers", () => {
 		assert.match(recollapsedText, /earlier lines/);
 		assert.doesNotMatch(recollapsedText, /\nline-1\n/);
 	});
+
+	for (const scenario of [
+		{
+			name: "exec_command error",
+			render: renderProcessResult,
+			details: { operation: "exec_command", running: false, exit_code: 1 },
+			highlight: "exit_code=1",
+			color: "error",
+		},
+		{
+			name: "write_stdin cancellation",
+			render: renderProcessResult,
+			details: { operation: "write_stdin", running: true, session_id: 3, wait_status: WAIT_CANCELLED },
+			highlight: "cancelled",
+			color: "warning",
+		},
+		{
+			name: "write_stdin steering",
+			render: renderProcessResult,
+			details: { operation: "write_stdin", running: true, session_id: 3, wait_status: WAIT_STEERED },
+			highlight: "steered",
+			color: "accent",
+		},
+		{
+			name: "kill_session success",
+			render: renderKillSessionResult,
+			details: { operation: "kill_session", status: "killed", running: false, found: true, session_id: 3 },
+			highlight: "killed session_id=3",
+			color: "success",
+		},
+		{
+			name: "kill_session failure",
+			render: renderKillSessionResult,
+			details: { operation: "kill_session", status: "kill_failed", running: true, found: true, session_id: 3 },
+			highlight: "FAILED session_id=3",
+			color: "error",
+		},
+	]) {
+		it(`keeps footer separators and log muted after ${scenario.name}`, () => {
+			const result = {
+				content: [{ type: "text", text: "" }],
+				details: { ...scenario.details, output: "", log: 241 },
+			} as any;
+			const component = scenario.render(
+				result,
+				{ expanded: false, isPartial: false },
+				colorTheme,
+				context({ startedAt: Date.now() - 800 }),
+			);
+			const line = rendered(component, 200).split("\n").find((line) => line.includes("log=241"))!;
+			const plain = stripTerminalSequences(line);
+			const assertColor = (label: string, color: ThemeColor): void => {
+				const column = plain.indexOf(label);
+				assert.ok(column >= 0, plain);
+				const cell = sliceByColumn(line, column + 1, 1);
+				assert.ok(
+					cell.endsWith(colorTheme.getFgAnsi(color) + stripTerminalSequences(cell)),
+					`${color} at column ${column}: ${JSON.stringify(cell)}`,
+				);
+			};
+			assertColor(scenario.details.running ? "yielded" : "took", "muted");
+			assertColor(scenario.highlight, scenario.color as ThemeColor);
+			assertColor(" · log=241", "muted");
+			assertColor("log=241", "muted");
+		});
+	}
 
 	it("defensively strips terminal-control sequences from calls and legacy details", () => {
 		const osc = "\x1b]52;c;YXR0YWNrZXI=\x07";

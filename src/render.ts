@@ -361,10 +361,10 @@ function buildStatusLine(
 		const now = state.endedAt ?? Date.now();
 		const duration = formatDurationSeconds(now - state.startedAt);
 		const label = options.isPartial ? "elapsed" : details.running ? "yielded" : "took";
-		bits.push(`${label} ${duration}`);
+		bits.push(theme.fg("muted", `${label} ${duration}`));
 	}
-	if (details.operation !== "kill_session" && typeof details.total_time_seconds === "number") {
-		bits.push(`total ${formatWallTime(details.total_time_seconds)}`);
+	if (typeof details.total_time_seconds === "number") {
+		bits.push(theme.fg("muted", `total ${formatWallTime(details.total_time_seconds)}`));
 	}
 
 	if (details.operation === "kill_session") {
@@ -373,18 +373,18 @@ function buildStatusLine(
 				? theme.fg("success", `killed session_id=${details.session_id ?? "?"}`)
 				: theme.fg("error", `FAILED session_id=${details.session_id ?? "?"} · still running`),
 		);
-		if (details.pid !== undefined) bits.push(`pid=${details.pid}`);
-		if (details.requested_signal) bits.push(`requested=${safeOneLine(details.requested_signal)}`);
+		if (details.pid !== undefined) bits.push(theme.fg("muted", `pid=${details.pid}`));
+		if (details.requested_signal) bits.push(theme.fg("muted", `requested=${safeOneLine(details.requested_signal)}`));
 		if (details.escalated) bits.push(theme.fg("warning", "escalated to SIGKILL"));
-		if (details.exit_code !== undefined) bits.push(`exit_code=${details.exit_code}`);
-		else if (details.signal) bits.push(`signal=${safeOneLine(details.signal)}`);
+		if (details.exit_code !== undefined) bits.push(theme.fg("muted", `exit_code=${details.exit_code}`));
+		else if (details.signal) bits.push(theme.fg("muted", `signal=${safeOneLine(details.signal)}`));
 	} else {
 		if (details.running && details.session_id !== undefined) {
-			bits.push(`session_id=${details.session_id}`);
+			bits.push(theme.fg("muted", `session_id=${details.session_id}`));
 		} else if (details.exit_code !== undefined) {
 			bits.push(
 				details.exit_code === 0
-					? `exit_code=${details.exit_code}`
+					? theme.fg("muted", `exit_code=${details.exit_code}`)
 					: theme.fg("error", `exit_code=${details.exit_code}`),
 			);
 		} else if (details.signal) {
@@ -395,10 +395,11 @@ function buildStatusLine(
 	if (details.failure_message) bits.push(theme.fg("error", `failure: ${safeOneLine(details.failure_message)}`));
 	if (details.wait_status === WAIT_CANCELLED) bits.push(theme.fg("warning", "cancelled"));
 	if (details.wait_status === WAIT_STEERED) bits.push(theme.fg("accent", "steered"));
-	if (details.completion_notification === "armed") bits.push("wake armed");
-	if (typeof details.log === "number") bits.push(`log=${details.log}`);
+	if (details.completion_notification === "armed") bits.push(theme.fg("muted", "wake armed"));
+	if (typeof details.log === "number") bits.push(theme.fg("muted", `log=${details.log}`));
 
-	return theme.fg("muted", bits.join(" · "));
+	// A highlight resets the foreground, so each separator sets its own color.
+	return bits.join(theme.fg("muted", " · "));
 }
 
 // ---------------- small structured results ----------------
