@@ -29,7 +29,7 @@ test("actual Pi: an RPC steer ends a long poll and reaches the next turn", async
 		cwd: root,
 		env: {
 			...process.env, HOME: root, PI_CODING_AGENT_DIR: join(root, "agent"), PI_OFFLINE: "1",
-			PI_UNIFIED_EXEC_MAX_EMPTY_POLL_MS: "",
+			PI_UNIFIED_EXEC_MAX_YIELD_MS: "",
 		},
 		stdio: ["pipe", "pipe", "pipe"],
 	});

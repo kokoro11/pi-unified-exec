@@ -86,7 +86,7 @@ describe("waitForExitOrDeadline", () => {
 		);
 	});
 
-	it("accepts the largest safe duration without timer overflow and remains cancellable", async () => {
+	it("accepts the largest finite duration without timer overflow and remains cancellable", async () => {
 		const exited = new AbortController();
 		const external = new AbortController();
 		const arms: number[] = [];
@@ -94,7 +94,7 @@ describe("waitForExitOrDeadline", () => {
 		const outcome = await waitForExitOrDeadline({
 			exited: exited.signal,
 			externalAbort: external.signal,
-			durationMs: Number.MAX_SAFE_INTEGER,
+			durationMs: Number.MAX_VALUE,
 			monotonicNow: () => 12345.6,
 			setTimeoutFn: (_cb, ms) => {
 				arms.push(ms);
@@ -109,12 +109,12 @@ describe("waitForExitOrDeadline", () => {
 	});
 
 	it("rejects invalid durations before arming timers", async () => {
-		for (const durationMs of [NaN, Infinity, -Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+		for (const durationMs of [NaN, Infinity, -Infinity]) {
 			await assert.rejects(waitForExitOrDeadline({
 				exited: new AbortController().signal,
 				durationMs,
 				setTimeoutFn: () => { throw new Error("timer should not arm"); },
-			}), /safe millisecond range/);
+			}), /must be finite/);
 		}
 	});
 

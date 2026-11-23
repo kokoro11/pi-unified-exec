@@ -1,9 +1,9 @@
-/** Unit tests for duration formatting and empty-poll limits. */
+/** Unit tests for duration formatting and attachment windows. */
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "bun:test";
 import { formatElapsed, formatWallTime } from "../src/format-time.ts";
-import { MAX_EMPTY_POLL_ENV_VAR, resolveEmptyPollYield, resolveMaxEmptyPollMs } from "../src/time.ts";
+import { MAX_YIELD_ENV_VAR, resolveMaxYieldMs, resolveYieldTimeMs } from "../src/time.ts";
 
 describe("duration formatting", () => {
 	it("formats second and millisecond inputs with the same precision", () => {
@@ -30,32 +30,38 @@ describe("duration formatting", () => {
 	});
 });
 
-describe("empty relative poll policy", () => {
-	it("keeps a short default and minimum, without a built-in maximum", () => {
-		for (const value of [undefined, 0, 0.5, 250, 4999]) {
-			assert.equal(resolveEmptyPollYield(value, {}), 5000);
-		}
-		for (const value of [290_001, 900_000, 86_400_000, Number.MAX_SAFE_INTEGER]) {
-			assert.equal(resolveEmptyPollYield(value, {}), value);
-		}
-		assert.equal(resolveEmptyPollYield(5000.9, {}), 5000);
-	});
+describe("attachment window policy", () => {
+	for (const [tool, hasInput, defaultMs] of [
+		["exec_command", false, 10_000],
+		["write_stdin", false, 10_000],
+		["write_stdin", true, 250],
+	] as const) {
+		it(`${tool}${hasInput ? " with input" : ""} uses its default and accepts any non-negative finite duration`, () => {
+			assert.equal(resolveYieldTimeMs(tool, undefined, hasInput, {}), defaultMs);
+			for (const ms of [0, 0.5, 25.9, 30_001, Number.MAX_VALUE]) {
+				assert.equal(resolveYieldTimeMs(tool, ms, hasInput, {}), Math.floor(ms));
+			}
+			for (const ms of [NaN, Infinity, -Infinity, -1]) {
+				assert.throws(() => resolveYieldTimeMs(tool, ms, hasInput, {}), /non-negative finite/);
+			}
+		});
 
-	it("rejects invalid tool durations rather than overflowing timers", () => {
-		for (const value of [NaN, Infinity, -Infinity, -1, Number.MAX_SAFE_INTEGER + 1]) {
-			assert.throws(() => resolveEmptyPollYield(value, {}), /non-negative finite/);
-		}
-	});
+		it(`${tool}${hasInput ? " with input" : ""} clamps both default and explicit waits`, () => {
+			for (const cap of [0, 100, 1000, 90_000]) {
+				const env = { [MAX_YIELD_ENV_VAR]: `${cap}.9` };
+				assert.equal(resolveYieldTimeMs(tool, undefined, hasInput, env), Math.min(defaultMs, cap));
+				assert.equal(resolveYieldTimeMs(tool, 0, hasInput, env), 0);
+				assert.equal(resolveYieldTimeMs(tool, cap, hasInput, env), cap);
+				assert.equal(resolveYieldTimeMs(tool, cap + 1, hasInput, env), cap);
+			}
+		});
+	}
 
-	it("keeps explicit operator limits and rejects invalid configuration", () => {
-		assert.equal(resolveMaxEmptyPollMs({}), undefined);
-		assert.equal(resolveMaxEmptyPollMs({ [MAX_EMPTY_POLL_ENV_VAR]: "  " }), undefined);
-		assert.equal(resolveMaxEmptyPollMs({ [MAX_EMPTY_POLL_ENV_VAR]: "1000" }), 5000);
-		const env = { [MAX_EMPTY_POLL_ENV_VAR]: "900000" };
-		assert.equal(resolveEmptyPollYield(900_000, env), 900_000);
-		assert.throws(() => resolveEmptyPollYield(900_001, env), /configured empty-poll cap of 900s.*Request a shorter wait\.$/);
-		for (const raw of ["0", "-1", "NaN", "Infinity", "oops", "9007199254740992"]) {
-			assert.throws(() => resolveMaxEmptyPollMs({ [MAX_EMPTY_POLL_ENV_VAR]: raw }), /positive finite/);
+	it("treats blank configuration as uncapped and rejects invalid caps", () => {
+		assert.equal(resolveMaxYieldMs({}), undefined);
+		assert.equal(resolveMaxYieldMs({ [MAX_YIELD_ENV_VAR]: "  " }), undefined);
+		for (const raw of ["-1", "NaN", "Infinity", "oops"]) {
+			assert.throws(() => resolveMaxYieldMs({ [MAX_YIELD_ENV_VAR]: raw }), /non-negative finite/);
 		}
 	});
 });

@@ -1,5 +1,5 @@
 /**
- * Event-driven wait for empty `write_stdin` polls.
+ * Event-driven wait for empty polls and long attachment windows.
  *
  * Unlike collectOutputUntilDeadline, this wait never accumulates drained
  * output in a per-call array. A long noisy process retains bounded output:
@@ -48,17 +48,16 @@ export async function waitForExitOrDeadline(inputs: LongWaitInputs): Promise<Lon
 	const setTimeoutFn = inputs.setTimeoutFn ?? ((cb: () => void, ms: number) => setTimeout(cb, ms));
 	const clearTimeoutFn = inputs.clearTimeoutFn ?? ((h: unknown) => clearTimeout(h as NodeJS.Timeout));
 
-	if (!Number.isFinite(durationMs) || Math.abs(durationMs) > Number.MAX_SAFE_INTEGER) {
-		throw new Error("Wait duration must be finite and within the safe millisecond range.");
+	if (!Number.isFinite(durationMs)) {
+		throw new Error("Wait duration must be finite.");
 	}
 	if (exited.aborted) return "exit";
 	if (externalAbort?.aborted) return "cancelled";
 	if (steerAbort?.aborted) return "steered";
 	if (durationMs <= 0) return "deadline";
 
-	// Subtract elapsed time rather than adding a possibly enormous duration
-	// to the clock. This accepts the full safe millisecond range without an
-	// overflowing or imprecise absolute deadline. Never consult wall time.
+	// Subtract elapsed time to avoid adding a possibly enormous duration to
+	// the clock. Never consult wall time.
 	const startedAt = monotonicNow();
 	const remainingMs = () => durationMs - (monotonicNow() - startedAt);
 
@@ -108,7 +107,7 @@ export async function waitForExitOrDeadline(inputs: LongWaitInputs): Promise<Lon
 	}
 }
 
-// ---------------- Rate-limited streaming for empty polls ----------------
+// ---------------- Rate-limited streaming ----------------
 
 /** Minimal Notify surface (src/notify.ts) needed by the rate-limited streamer. */
 interface NotifyLike {
@@ -129,7 +128,7 @@ export interface RateLimitedStreamOptions {
 }
 
 /**
- * TUI updates for an empty poll. An ordinary periodic heartbeat must not
+ * Output-driven TUI updates. An ordinary periodic heartbeat must not
  * run for hours, so this streamer:
  *   - emits one initial waiting update;
  *   - emits output-driven updates rate-limited to `minIntervalMs`

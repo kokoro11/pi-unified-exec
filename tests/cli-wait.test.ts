@@ -34,7 +34,7 @@ for (const veto of [false, true]) {
 				cwd: root,
 				env: {
 					...process.env, HOME: root, PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "1",
-					PI_CACHE_RETENTION: "short", PI_UNIFIED_EXEC_MAX_EMPTY_POLL_MS: "",
+					PI_CACHE_RETENTION: "short", PI_UNIFIED_EXEC_MAX_YIELD_MS: "",
 					EXEC_WAIT_VETO: veto ? "1" : "0",
 				},
 				encoding: "utf8", timeout: 25_000, maxBuffer: 4 * 1024 * 1024,

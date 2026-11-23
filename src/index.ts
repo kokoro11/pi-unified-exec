@@ -30,7 +30,6 @@ import { registerCompactCodemode } from "./codemode-render.ts";
 import { CompletionCoordinator, type OnExitPolicy, type OnExitStatus } from "./completion.ts";
 import { formatElapsed } from "./format-time.ts";
 import { type LongWaitOutcome, startRateLimitedStream, waitForExitOrDeadline } from "./long-wait.ts";
-import { sleep } from "./notify.ts";
 import { OUTPUT_LOG_PATH_TEMPLATE } from "./output-log.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
 import { getPtyLoadError, isPtyAvailable } from "./pty.ts";
@@ -65,8 +64,8 @@ import {
 	steerInterruptEnabled,
 } from "./steer-gate.ts";
 import { buildShellCommand, IS_WINDOWS, resolveDefaultShell, resolveWindowsShell } from "./shell.ts";
-import { MIN_EMPTY_YIELD_TIME_MS, resolveEmptyPollYield } from "./time.ts";
-export { MAX_EMPTY_POLL_ENV_VAR, resolveMaxEmptyPollMs } from "./time.ts";
+import { DEFAULT_INPUT_YIELD_MS, DEFAULT_YIELD_MS, MAX_YIELD_ENV_VAR, resolveYieldTimeMs } from "./time.ts";
+export { MAX_YIELD_ENV_VAR, resolveMaxYieldMs } from "./time.ts";
 import {
 	finalizeKillResult,
 	finalizeProcessResult,
@@ -80,22 +79,20 @@ import { unescapeChars } from "./unescape.ts";
 
 // ---------------- Constants (mirror codex) ----------------
 
-const MIN_YIELD_TIME_MS = 250;
-const MAX_YIELD_TIME_MS = 30_000;
-const DEFAULT_EXEC_YIELD_MS = 10_000;
-const DEFAULT_WRITE_STDIN_YIELD_MS = 250;
 const EARLY_EXIT_GRACE_PERIOD_MS = 150;
 const MAX_SESSIONS = 64;
 const WARNING_SESSIONS = 60;
 const LRU_PROTECTED_COUNT = 8;
-const OUTPUT_POLL_INTERVAL_MS = 250; // exec/input updates and short empty-poll rate limit
+const OUTPUT_POLL_INTERVAL_MS = 250;
 // PTY dimension clamps for exec_command's cols/rows (tty: true only).
 const MIN_PTY_COLS = 20;
 const MAX_PTY_COLS = 500;
 const MIN_PTY_ROWS = 5;
 const MAX_PTY_ROWS = 300;
-// Long empty polls use output-driven updates, never a periodic heartbeat.
+// Long waits keep output in the session buffer and use output-driven updates.
+const LONG_WAIT_THRESHOLD_MS = 30_000;
 const LONG_WAIT_UPDATE_INTERVAL_MS = 30_000;
+const YIELD_DESCRIPTION = `Minimum 0 (return without waiting), no built-in maximum. ${MAX_YIELD_ENV_VAR} clamps longer waits to the configured cap.`;
 
 /**
  * Google-compatible string enum schema (plain `type: "string"` + `enum`,
@@ -110,11 +107,6 @@ function StringEnum<T extends readonly string[]>(values: T, description: string)
 
 function clamp(n: number, lo: number, hi: number): number {
 	return Math.min(hi, Math.max(lo, n));
-}
-
-function clampYield(ms: number | undefined, defaultMs: number): number {
-	const v = typeof ms === "number" && ms > 0 ? ms : defaultMs;
-	return clamp(Math.floor(v), MIN_YIELD_TIME_MS, MAX_YIELD_TIME_MS);
 }
 
 /**
@@ -238,6 +230,7 @@ async function runExecCommand(
 	if (ctx.shuttingDown) {
 		throw new Error("unified-exec: session is shutting down; not starting new commands.");
 	}
+	const yieldTimeMs = resolveYieldTimeMs("exec_command", args.yield_time_ms);
 	const tty = args.tty ?? false;
 	if (tty && !isPtyAvailable()) {
 		throw new Error(
@@ -278,7 +271,6 @@ async function runExecCommand(
 	}
 	const shellCommand = buildShellCommand(shellBin, args.cmd);
 	const effectiveCwd = args.workdir && args.workdir.length > 0 ? args.workdir : cwd;
-	const yieldTimeMs = clampYield(args.yield_time_ms, DEFAULT_EXEC_YIELD_MS);
 	const wantsWake = args.on_exit === "wake";
 	const directWake = wantsWake ? directCompletionFields("wake") : undefined;
 
@@ -316,26 +308,23 @@ async function runExecCommand(
 	// be able to terminate children that are still inside the grace window.
 	ctx.pendingSessions.add(session);
 	try {
-		// Early-exit grace: if the process dies within 150 ms, treat it as a
-		// short-lived command and never register it.
-		const start = Date.now();
-		const earlyDeadline = start + EARLY_EXIT_GRACE_PERIOD_MS;
-		await Promise.race([
-			new Promise<void>((resolve) => {
-				if (session.hasExited) return resolve();
-				session.exited.addEventListener("abort", () => resolve(), { once: true });
-			}),
-			sleep(EARLY_EXIT_GRACE_PERIOD_MS, signal),
-		]);
-
-		if (session.hasExited && Date.now() <= earlyDeadline + 20) {
+		// Give short-lived commands a chance to finish without registering
+		// them. This time counts against the requested attachment window.
+		const start = performance.now();
+		const earlyDuration = Math.min(yieldTimeMs, EARLY_EXIT_GRACE_PERIOD_MS);
+		if (earlyDuration > 0) {
+			await waitForExitOrDeadline({
+				exited: session.exited, externalAbort: signal, steerAbort: steerSignal, durationMs: earlyDuration,
+			});
+		}
+		if (session.hasExited) {
 			// Fully short-lived: collect everything in the buffer + any trailing
 			// bytes. macOS can deliver stdout/stderr shortly after the exit event
 			// for very fast commands — give the trailing drain a bounded window.
 			const collected = await session.collect({ deadlineMs: Date.now() + 500, externalAbort: signal });
 			return finalizeSessionResult(session, collected, {
 				operation: "exec_command",
-				wallTimeSec: (Date.now() - start) / 1000,
+				wallTimeSec: (performance.now() - start) / 1000,
 				running: false,
 				failure: session.failureMessage,
 				yieldTimeMs,
@@ -364,15 +353,14 @@ async function runExecCommand(
 		// lost across turns.
 
 		// Wait until the yield deadline (or abort/exit). Stream updates meanwhile.
-		const deadlineMs = start + yieldTimeMs;
-		const pollStream = startStreaming(session, onUpdate, deadlineMs, signal, () => wantsWake ? "wake" : undefined);
-		const collected = await session.collect({ deadlineMs, externalAbort: signal, stopSignal: steerSignal });
-		pollStream.stop();
+		const collected = await collectAttachedOutput(
+			session, yieldTimeMs, start, signal, steerSignal, onUpdate, () => wantsWake ? "wake" : undefined,
+		);
 
 		session.touch();
 		const running = !session.hasExited;
-		const steered = steerSignal?.aborted === true && signal?.aborted !== true && Date.now() < deadlineMs;
-		const wallSec = (Date.now() - start) / 1000;
+		const elapsedMs = performance.now() - start;
+		const steered = steerSignal?.aborted === true && signal?.aborted !== true && elapsedMs < yieldTimeMs;
 
 		if (running) {
 			// COMMIT POINT for on_exit: "wake" — we are now returning a background
@@ -386,7 +374,7 @@ async function runExecCommand(
 		}
 		return finalizeSessionResult(session, collected, {
 			operation: "exec_command",
-			wallTimeSec: wallSec,
+			wallTimeSec: elapsedMs / 1000,
 			running,
 			failure: running ? null : session.failureMessage,
 			yieldTimeMs,
@@ -417,9 +405,7 @@ async function runWriteStdin(
 	const session = ctx.store.get(sid) ??
 		(policyOnly && policy === "none" ? ctx.coordinator.pendingWakeSession(sid) : undefined);
 	if (!(session instanceof ExecSession)) throw new Error(`unknown session_id: ${sid}`);
-	const yieldTimeMs = policyOnly ? undefined : hasInput
-		? clampYield(args.yield_time_ms, DEFAULT_WRITE_STDIN_YIELD_MS)
-		: resolveEmptyPollYield(args.yield_time_ms);
+	const yieldTimeMs = policyOnly ? undefined : resolveYieldTimeMs("write_stdin", args.yield_time_ms, hasInput);
 
 	if (policy !== undefined) signal?.throwIfAborted();
 	const change = policy === undefined ? undefined : ctx.coordinator.setOnExit(sid, policy, session);
@@ -448,7 +434,7 @@ async function writeAndCollect(
 	toolCallId: string,
 	getOnExit: () => ProcessResultDetails["on_exit"],
 ): Promise<ProcessResultDetails> {
-	const start = Date.now();
+	const start = performance.now();
 	session.touch();
 
 	// Observation lease: while this call may return terminal status, a
@@ -463,7 +449,7 @@ async function writeAndCollect(
 			ctx.coordinator.markPendingTerminal(session.id, toolCallId);
 			return finalizeSessionResult(session, collected, {
 				operation: "write_stdin",
-				wallTimeSec: (Date.now() - start) / 1000,
+				wallTimeSec: (performance.now() - start) / 1000,
 				running: false,
 				failure: session.failureMessage,
 				yieldTimeMs,
@@ -471,15 +457,9 @@ async function writeAndCollect(
 			});
 		}
 		const writeFailure = ok ? null : "stdin write failed: the child closed its stdin; bytes were not delivered";
-		// Give the child a small window to react before the poll.
-		await sleep(100, signal);
-
-		const deadlineMs = start + yieldTimeMs;
-		const pollStream = startStreaming(session, onUpdate, deadlineMs, signal, getOnExit);
-		const collected = await session.collect({ deadlineMs, externalAbort: signal, stopSignal: steerSignal });
-		pollStream.stop();
-		const wallSec = (Date.now() - start) / 1000;
-		const steered = steerSignal?.aborted === true && signal?.aborted !== true && Date.now() < deadlineMs;
+		const collected = await collectAttachedOutput(session, yieldTimeMs, start, signal, steerSignal, onUpdate, getOnExit);
+		const elapsedMs = performance.now() - start;
+		const steered = steerSignal?.aborted === true && signal?.aborted !== true && elapsedMs < yieldTimeMs;
 
 		const onExit = getOnExit();
 		const running = !session.hasExited;
@@ -495,7 +475,7 @@ async function writeAndCollect(
 		}
 		return finalizeSessionResult(session, collected, {
 			operation: "write_stdin",
-			wallTimeSec: wallSec,
+			wallTimeSec: elapsedMs / 1000,
 			running,
 			failure: running ? writeFailure : session.failureMessage ?? writeFailure,
 			yieldTimeMs,
@@ -520,7 +500,64 @@ function directCompletionFields(onExit: ProcessResultDetails["on_exit"]): Proces
 	};
 }
 
-/** Empty polls retain bounded output in the session, not in the wait. */
+/** Keep output in the session during empty polls and long command/input waits. */
+async function waitForBufferedOutput(
+	session: ExecSession,
+	durationMs: number | undefined,
+	remainingMs: number,
+	signal: AbortSignal | undefined,
+	steerSignal: AbortSignal | undefined,
+	onUpdate: AgentToolUpdateCallback<ProcessUpdateDetails> | undefined,
+	getOnExit: () => ProcessResultDetails["on_exit"],
+): Promise<{ outcome: LongWaitOutcome; collected: CollectResult }> {
+	const streamer = onUpdate && remainingMs > 0 ? startRateLimitedStream({
+		outputNotify: session.outputNotify,
+		minIntervalMs: remainingMs <= LONG_WAIT_THRESHOLD_MS ? OUTPUT_POLL_INTERVAL_MS : LONG_WAIT_UPDATE_INTERVAL_MS,
+		emit: () => onUpdate(buildStreamUpdate(session, getOnExit(), durationMs)),
+	}) : undefined;
+	try {
+		let outcome = await waitForExitOrDeadline({
+			exited: session.exited,
+			externalAbort: signal,
+			steerAbort: steerSignal,
+			durationMs: remainingMs,
+		});
+		// Exit wins close races. Live cancellation leaves the buffer intact.
+		if (session.hasExited) outcome = "exit";
+		const collected = outcome === "cancelled"
+			? { bytes: new Uint8Array(0), omittedBytes: 0 }
+			: await session.collect({
+				deadlineMs: Date.now() + (outcome === "exit" ? 1000 : 0),
+				externalAbort: outcome === "exit" ? undefined : signal,
+			});
+		return { outcome, collected };
+	} finally {
+		streamer?.stop();
+	}
+}
+
+async function collectAttachedOutput(
+	session: ExecSession,
+	durationMs: number,
+	startedAt: number,
+	signal: AbortSignal | undefined,
+	steerSignal: AbortSignal | undefined,
+	onUpdate: AgentToolUpdateCallback<ProcessUpdateDetails> | undefined,
+	getOnExit: () => ProcessResultDetails["on_exit"],
+): Promise<CollectResult> {
+	const remainingMs = Math.max(0, durationMs - (performance.now() - startedAt));
+	if (durationMs > LONG_WAIT_THRESHOLD_MS) {
+		return (await waitForBufferedOutput(session, durationMs, remainingMs, signal, steerSignal, onUpdate, getOnExit)).collected;
+	}
+	const deadlineMs = Date.now() + remainingMs;
+	const streamer = remainingMs > 0 ? startStreaming(session, onUpdate, deadlineMs, signal, getOnExit) : undefined;
+	try {
+		return await session.collect({ deadlineMs, externalAbort: signal, stopSignal: steerSignal });
+	} finally {
+		streamer?.stop();
+	}
+}
+
 async function runAttachedWait(
 	ctx: ExtensionCtx,
 	session: ExecSession,
@@ -535,31 +572,10 @@ async function runAttachedWait(
 	session.touch();
 	ctx.coordinator.beginObservation(session.id, toolCallId);
 	let pendingTerminal = false;
-	let streamer: { stop: () => void } | undefined;
 	try {
-		if (onUpdate && durationMs !== undefined) {
-			streamer = startRateLimitedStream({
-				outputNotify: session.outputNotify,
-				minIntervalMs: durationMs <= MAX_YIELD_TIME_MS
-					? OUTPUT_POLL_INTERVAL_MS : LONG_WAIT_UPDATE_INTERVAL_MS,
-				emit: () => onUpdate(buildStreamUpdate(session, getOnExit(), durationMs)),
-			});
-		}
-		let outcome: LongWaitOutcome = await waitForExitOrDeadline({
-			exited: session.exited,
-			externalAbort: signal,
-			steerAbort: steerSignal,
-			durationMs: durationMs ?? 0,
-		});
-		// Exit wins close races. A cancelled live wait never drains output; a
-		// steered one drains like a reached deadline (the session stays live).
-		if (session.hasExited) outcome = "exit";
-		const collected = outcome === "cancelled"
-			? { bytes: new Uint8Array(0), omittedBytes: 0 }
-			: await session.collect({
-				deadlineMs: Date.now() + (outcome === "exit" ? 1000 : 0),
-				externalAbort: outcome === "exit" ? undefined : signal,
-			});
+		const { outcome, collected } = await waitForBufferedOutput(
+			session, durationMs, durationMs ?? 0, signal, steerSignal, onUpdate, getOnExit,
+		);
 		const onExit = getOnExit();
 		const elapsedMs = performance.now() - startedAt;
 		const running = outcome !== "exit";
@@ -584,7 +600,6 @@ async function runAttachedWait(
 		}
 		return shape;
 	} finally {
-		streamer?.stop();
 		// Successful terminal delivery is committed by tool_execution_end.
 		if (!pendingTerminal) ctx.coordinator.releaseObservation(session.id, toolCallId);
 	}
@@ -887,9 +902,8 @@ export default function (pi: ExtensionAPI) {
 			'Run a command in a persistent session. `[running #N]` means N is the session_id; `[exited ok]` or `[exited error N]` means the command finished. on_exit defaults to "none". Only pass on_exit: "wake" when the human explicitly wants auto-resume on unobserved exit. Use write_stdin with on_exit to change the policy.',
 		promptSnippet: "Run a routine shell command or an async/interactive task",
 		promptGuidelines: [
-			`exec_command: For routine commands do not set yield_time_ms to below ${DEFAULT_EXEC_YIELD_MS}, unless it's a background/async/interactive task. The yield_time_ms of the final write_stdin should also not be set below ${DEFAULT_EXEC_YIELD_MS}.`,
-			"exec_command: For interactive tasks, start with a brief yield (1000ms). Don't set yield too low, you still need it to boot up.",
-			`exec_command: For async/background tasks, you can start with a very low yield (${MIN_YIELD_TIME_MS}ms).`,
+			"exec_command & write_stdin: Use the default wait for routine commands and their final poll. Use a short wait when starting or driving an interactive task.",
+			"exec_command: Use yield_time_ms: 0 to start a background task and return without waiting.",
 			"exec_command: Long-running commands return a session_id (#N) you can use to drive write_stdin.",
 		],
 		outputSchema: execCommandScriptResultSchema,
@@ -914,7 +928,8 @@ export default function (pi: ExtensionAPI) {
 			),
 			yield_time_ms: Type.Optional(
 				Type.Number({
-					description: `How long (ms) this call stays attached waiting for output before yielding — an attachment window, not the command's lifetime or completion timeout. Default ${DEFAULT_EXEC_YIELD_MS}, clamped to [${MIN_YIELD_TIME_MS}, ${MAX_YIELD_TIME_MS}].`,
+					minimum: 0,
+					description: `How long (ms) to stay attached and collect output. Does not stop the command. Default ${DEFAULT_YIELD_MS}. ${YIELD_DESCRIPTION}`,
 				}),
 			),
 			on_exit: Type.Optional(
@@ -965,7 +980,8 @@ export default function (pi: ExtensionAPI) {
 			),
 			yield_time_ms: Type.Optional(
 				Type.Number({
-					description: `Attachment window, same as exec_command. When input exists: default is ${DEFAULT_WRITE_STDIN_YIELD_MS}, clamped to [${MIN_YIELD_TIME_MS}, ${MAX_YIELD_TIME_MS}]. Otherwise, default/minimum is ${MIN_EMPTY_YIELD_TIME_MS}, no built-in maximum.`,
+					minimum: 0,
+					description: `How long (ms) to stay attached and collect output. Default ${DEFAULT_YIELD_MS} without input or ${DEFAULT_INPUT_YIELD_MS} with input. ${YIELD_DESCRIPTION}`,
 				}),
 			),
 			on_exit: Type.Optional(StringEnum(

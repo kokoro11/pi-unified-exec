@@ -123,7 +123,7 @@ export function renderExecCommandCall(
 	// Match Pi's built-in bash renderer: preserve multiline commands verbatim.
 	const cmd = sanitizeOutputText(args?.cmd || "...");
 	const parts: string[] = [];
-	if (args?.yield_time_ms) parts.push(`yield ${formatElapsed(args.yield_time_ms)}`);
+	if (args?.yield_time_ms !== undefined) parts.push(`yield ${formatElapsed(args.yield_time_ms)}`);
 	const effectiveCwd = args?.workdir || context.cwd;
 	if (effectiveCwd) parts.push(`cwd: ${safeOneLine(tildify(effectiveCwd))}`);
 	if (args?.tty) parts.push("tty");
@@ -154,7 +154,7 @@ export function renderWriteStdinCall(
 		: chars.length > 0
 			? theme.fg("toolTitle", theme.bold(`» ${stringifyChars(chars)}`))
 			: theme.fg("toolTitle", theme.bold(`» (base64, ${base64ByteLength(b64)} bytes)`));
-	const yieldSuffix = args?.yield_time_ms
+	const yieldSuffix = args?.yield_time_ms !== undefined
 		? theme.fg("muted", ` (yield ${formatElapsed(args.yield_time_ms)})`)
 		: "";
 	const policy = args?.on_exit === "none" || args?.on_exit === "wake" ? ` on_exit=${args.on_exit}` : "";

@@ -13,7 +13,7 @@ Starts a process and waits for an initial result. A process that finishes during
 | `shell` | Bash; PowerShell fallback on Windows | Shell executable. Windows also supports explicit `cmd`, `powershell`, or `pwsh`. |
 | `tty` | `false` | Set to `true` for a terminal. Use pipes for programs that only need stdin and output. |
 | `cols`, `rows` | `120`, `30` | Initial terminal size; clamped to 20–500 columns and 5–300 rows. Ignored in pipe mode. |
-| `yield_time_ms` | `10000` | How long the call stays attached; clamped to 250–30,000 ms. |
+| `yield_time_ms` | `10000` | How long the call stays attached. `0` starts the command without waiting. |
 | `on_exit` | `"none"` | Use `"wake"` only when the human requests automatic resumption after an unobserved exit. |
 
 ## `write_stdin`
@@ -24,7 +24,7 @@ Takes a `session_id` from `exec_command`. Omit input to poll, or send input befo
 | --- | --- | --- |
 | `chars` | Empty | Text and C-style escapes, written as UTF-8. |
 | `chars_b64` | Empty | Base64 for exact bytes. Use it instead of `chars`; malformed base64 is rejected. |
-| `yield_time_ms` | `250` with input; `5000` for an empty poll | With input, clamped to 250–30,000 ms. For an empty poll the minimum is 5000 ms and there is no built-in maximum. Supply a finite non-negative duration within `Number.MAX_SAFE_INTEGER`; fractions round down. |
+| `yield_time_ms` | `250` with input; `10000` for an empty poll | How long the call stays attached. `0` sends any input and collects available output without waiting for more. |
 | `on_exit` | Keep the current policy | `"none"` disarms a pending wake. `"wake"` arms a live session. Use `"wake"` only when the human requests automatic resumption. |
 
 Pass `session_id` and `on_exit` alone to apply the wake policy and drain available output without waiting for the process to exit. If the session has already exited, the same call collects its final output and retires the session ID. A late `"wake"` request cannot arm a new wake for an exited session. The reply explains this and reports `"none"` if there was no wake or `"consumed"` if the wake has already been resolved. If an existing wake is still pending, collecting the exit consumes it.
@@ -33,7 +33,8 @@ This form also lets you disarm a pending wake after its session has been evicted
 
 ### Waiting and cancellation
 
-- Reaching `yield_time_ms` ends the current wait and leaves the process running. Choose a finite duration that fits the job. Use short polls for REPLs, dev servers, and other ongoing or interactive work.
+- For both tools, use a finite non-negative duration in milliseconds. Fractions round down. There is no built-in maximum; `PI_UNIFIED_EXEC_MAX_YIELD_MS` can cap every attachment window.
+- Reaching the effective duration ends the current wait and leaves the process running. Use short polls for REPLs, dev servers, and other ongoing or interactive work.
 - Esc cancels the wait without killing the child. An empty poll keeps its buffered output available for the next call.
 - A human steer (including RPC `steer`) returns early, drains output so far, and leaves the child alive. `wait_status` tells the model to read and address the steering message first, then poll again only if the session is still relevant. Nested Codemode calls throw while a steer is queued so a script can stop polling. Follow-ups and extension-generated steers do not trigger this behavior.
 - `wait_status` is optional and gives plain-language next steps only for cancellation and steering. Normal completion and reached deadlines omit the field from tool replies and structured results. Scripts use `running` and `exit_code` to inspect process state.
@@ -84,6 +85,6 @@ The `--keep-builtin-bash` flag opts out of replacing Pi's built-in `bash` tool.
 | Environment variable | Effect |
 | --- | --- |
 | `PI_UNIFIED_EXEC_BASH` | Override Git Bash discovery on Windows. The default searches PATH and common Git installations before falling back to PowerShell. |
-| `PI_UNIFIED_EXEC_MAX_EMPTY_POLL_MS` | Limit empty polls. Unset or blank means no cap. Values must be positive, finite, and within `Number.MAX_SAFE_INTEGER`; fractions round down and values below 5000 become 5000. Polls above the cap fail. |
+| `PI_UNIFIED_EXEC_MAX_YIELD_MS` | Clamp default and explicit waits for `exec_command` and `write_stdin` to this many milliseconds. Use a finite non-negative value; fractions round down. `0` disables waiting. Unset or blank means no cap. |
 | `PI_UNIFIED_EXEC_STEER_INTERRUPT=0` | Leave waits attached when a human steers. |
 | `PI_UNIFIED_EXEC_COMPACT_CODEMODE=0` | Use the native Codemode rendering. |

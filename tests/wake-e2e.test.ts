@@ -206,7 +206,7 @@ describe("write_stdin attached waits", () => {
 		await h.emit("session_start");
 		const r1 = await h.call("exec_command", { cmd: "sleep 6.2", yield_time_ms: 250, on_exit: "wake" });
 		const updateStates: unknown[] = [];
-		const r2 = await h.call("write_stdin", { session_id: r1.details.session_id }, undefined, (update) => {
+		const r2 = await h.call("write_stdin", { session_id: r1.details.session_id, yield_time_ms: 5000 }, undefined, (update) => {
 			updateStates.push(update.details.on_exit);
 		});
 		assert.equal(r2.details.yield_time_ms, 5000);

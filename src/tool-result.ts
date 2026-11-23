@@ -154,7 +154,7 @@ export function finalizeProcessResult(input: FinalizeProcessInput): ProcessResul
 	};
 	if (input.sessionId !== undefined) shape.session_id = input.sessionId;
 	addProcessMetadata(shape, input);
-	if (input.yieldTimeMs) shape.yield_time_ms = input.yieldTimeMs;
+	if (input.yieldTimeMs !== undefined) shape.yield_time_ms = input.yieldTimeMs;
 	const metadata = input.metadata;
 	if (metadata?.completion_delivery !== undefined) shape.completion_delivery = metadata.completion_delivery;
 	if (metadata?.on_exit !== undefined) shape.on_exit = metadata.on_exit;

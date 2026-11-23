@@ -12,7 +12,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "bun:test";
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
-import { MAX_EMPTY_POLL_ENV_VAR } from "../src/time.ts";
+import { MAX_YIELD_ENV_VAR } from "../src/time.ts";
 import { OUTPUT_LOG_DIRECTORY } from "../src/output-log.ts";
 import { DEFAULT_STREAM_TAIL_BYTES } from "../src/session.ts";
 import { IS_WINDOWS } from "../src/shell.ts";
@@ -162,6 +162,7 @@ describe("unified-exec e2e", () => {
 		await h.emit("session_start");
 		const r = await h.call("exec_command", { cmd: "echo hello && echo world" });
 		assert.equal(r.details.exit_code, 0);
+		assert.equal(r.details.yield_time_ms, 10_000);
 		assert.equal(r.details.session_id, undefined);
 		assert.ok(r.details.output.includes("hello"));
 		assert.ok(r.details.output.includes("world"));
@@ -209,8 +210,8 @@ describe("unified-exec e2e", () => {
 	});
 
 	it("empty write_stdin accepts a long relative wait and returns early on exit", async () => {
-		const previous = process.env[MAX_EMPTY_POLL_ENV_VAR];
-		delete process.env[MAX_EMPTY_POLL_ENV_VAR];
+		const previous = process.env[MAX_YIELD_ENV_VAR];
+		delete process.env[MAX_YIELD_ENV_VAR];
 		const h = makeHarness();
 		try {
 			await h.emit("session_start");
@@ -230,45 +231,69 @@ describe("unified-exec e2e", () => {
 			assert.equal(Object.hasOwn(r2.details, "wait_status"), false);
 			assert.match(r2.details.output, /long-poll-finished/);
 		} finally {
-			if (previous === undefined) delete process.env[MAX_EMPTY_POLL_ENV_VAR];
-			else process.env[MAX_EMPTY_POLL_ENV_VAR] = previous;
+			if (previous === undefined) delete process.env[MAX_YIELD_ENV_VAR];
+			else process.env[MAX_YIELD_ENV_VAR] = previous;
 			await h.emit("session_shutdown");
 		}
 	});
 
-	it("an explicit operator cap rejects longer relative waits without clamping", async () => {
-		const previous = process.env[MAX_EMPTY_POLL_ENV_VAR];
-		process.env[MAX_EMPTY_POLL_ENV_VAR] = "10000";
+	it("a zero cap clamps all waits without skipping process launch or input", async () => {
+		const previous = process.env[MAX_YIELD_ENV_VAR];
+		process.env[MAX_YIELD_ENV_VAR] = "0";
 		const h = makeHarness();
 		try {
 			await h.emit("session_start");
-			const r1 = await h.call("exec_command", {
-				cmd: "sleep 0.4",
-				yield_time_ms: 250,
+			const started = await h.call("exec_command", {
+				cmd: 'read -r line; sleep 0.3; printf "%s" "$line"',
+				yield_time_ms: 1000,
 			});
-			assert.ok(typeof r1.details.session_id === "number", `got ${JSON.stringify(r1.details)}`);
-			const sid = r1.details.session_id;
+			const sid = started.details.session_id;
+			assert.equal(typeof sid, "number");
+			const polled = await h.call("write_stdin", { session_id: sid, yield_time_ms: 1000 });
+			const written = await h.call("write_stdin", { session_id: sid, chars: "zero-cap\n", yield_time_ms: 1000 });
+			for (const result of [started, polled, written]) {
+				assert.equal(result.details.yield_time_ms, 0);
+				assert.equal(result.details.running, true);
+			}
 
-			await new Promise((r) => setTimeout(r, 700));
-
-			// Values above the lowered cap are rejected against that cap…
-			await assert.rejects(
-				() => h.call("write_stdin", { session_id: sid, chars: "", yield_time_ms: 20_000 }),
-				/exceeds the configured empty-poll cap of 10s/,
-			);
-			// …while in-cap values behave normally.
-			const r2 = await h.call("write_stdin", {
-				session_id: sid,
-				chars: "",
-				yield_time_ms: 10_000,
-			});
-			assert.equal(r2.details.yield_time_ms, 10_000);
-			assert.equal(r2.details.session_id, sid);
-			assert.equal(r2.details.running, false);
-			assert.equal(r2.details.exit_code, 0);
+			delete process.env[MAX_YIELD_ENV_VAR];
+			const finished = await h.call("write_stdin", { session_id: sid });
+			assert.equal(finished.details.yield_time_ms, 10_000);
+			assert.equal(finished.details.exit_code, 0);
+			assert.equal(finished.details.output, "zero-cap");
 		} finally {
-			if (previous === undefined) delete process.env[MAX_EMPTY_POLL_ENV_VAR];
-			else process.env[MAX_EMPTY_POLL_ENV_VAR] = previous;
+			if (previous === undefined) delete process.env[MAX_YIELD_ENV_VAR];
+			else process.env[MAX_YIELD_ENV_VAR] = previous;
+			await h.emit("session_shutdown");
+		}
+	});
+
+	it("long exec and input waits return on exit without overflowing the timer", async () => {
+		const previous = process.env[MAX_YIELD_ENV_VAR];
+		delete process.env[MAX_YIELD_ENV_VAR];
+		const h = makeHarness();
+		try {
+			await h.emit("session_start");
+			const yield_time_ms = 3_000_000_000;
+			const exec = await h.call("exec_command", { cmd: "sleep 0.3; echo long-exec", yield_time_ms });
+			assert.equal(exec.details.yield_time_ms, yield_time_ms);
+			assert.equal(exec.details.exit_code, 0);
+			assert.match(exec.details.output, /long-exec/);
+
+			const started = await h.call("exec_command", {
+				cmd: 'read -r line; sleep 0.3; printf "%s" "$line"',
+				yield_time_ms: 0,
+			});
+			assert.equal(started.details.yield_time_ms, 0);
+			const result = await h.call("write_stdin", {
+				session_id: started.details.session_id, chars: "long-input\n", yield_time_ms,
+			});
+			assert.equal(result.details.yield_time_ms, yield_time_ms);
+			assert.equal(result.details.exit_code, 0);
+			assert.equal(result.details.output, "long-input");
+		} finally {
+			if (previous === undefined) delete process.env[MAX_YIELD_ENV_VAR];
+			else process.env[MAX_YIELD_ENV_VAR] = previous;
 			await h.emit("session_shutdown");
 		}
 	});

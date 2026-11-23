@@ -55,7 +55,7 @@ setTimeout(() => console.log("job-finished"), ${cancel ? 30_000 : 5000});
 `);
 			const command = [
 				"env", `HOME=${root}`, `PI_CODING_AGENT_DIR=${agentDir}`, "PI_OFFLINE=1",
-				"PI_UNIFIED_EXEC_MAX_EMPTY_POLL_MS=", "EXEC_WAIT_VETO=0",
+				"PI_UNIFIED_EXEC_MAX_YIELD_MS=", "EXEC_WAIT_VETO=0",
 				"node", cli, "--no-session", "--no-extensions", "--no-skills",
 				"--no-prompt-templates", "--no-themes", "-e", provider, "-e", extension,
 				"--provider", "exec-wait-offline", "--model", "wait-model", "--thinking", "off", "run fixture",

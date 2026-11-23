@@ -4,6 +4,7 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Use a 10-second default attachment window for `exec_command` and empty `write_stdin` polls; input writes default to 250 ms. All accept zero and have no built-in maximum. `PI_UNIFIED_EXEC_MAX_YIELD_MS` replaces the empty-poll-only cap and clamps both default and explicit waits across both tools.
 - Keep session status, the widget, and the picker together and share their formatting of running sessions.
 - Use the recorded exit time for session state and duration, and reuse the tracked byte count when snapshotting live output.
 - Share result assembly across command launches, input writes, polls, and kills while keeping tool replies and wake behavior unchanged.
