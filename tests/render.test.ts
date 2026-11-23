@@ -95,6 +95,7 @@ describe("unified-exec renderers", () => {
 			escalated: false,
 			killed: true,
 		});
+		details.note = "Remember to poll and collect output of #1";
 		const result = { content: [{ type: "text", text: renderKillResultText(details) }], details } as any;
 		const state: Record<string, unknown> = {};
 
@@ -110,6 +111,7 @@ describe("unified-exec renderers", () => {
 		assert.match(collapsedText, /pid=777/);
 		assert.match(collapsedText, /total 1\.5s/);
 		assert.match(collapsedText, / ·\s+log=73$/m);
+		assert.doesNotMatch(collapsedText, /Remember to poll/);
 
 		const expanded = renderKillSessionResult(
 			result,
@@ -121,6 +123,7 @@ describe("unified-exec renderers", () => {
 		assert.match(expandedText, /line-1\n/);
 		assert.match(expandedText, /line-20/);
 		assert.doesNotMatch(expandedText, /earlier lines/);
+		assert.doesNotMatch(expandedText, /Remember to poll/);
 
 		const recollapsed = renderKillSessionResult(
 			result,
@@ -284,16 +287,34 @@ describe("unified-exec renderers", () => {
 
 	it("kill_session unknown-id results are compact errors", () => {
 		const text = "[kill failed #999]\nfailure: No such session: 999";
+		const note = "Remember to poll and collect output of #1";
 		const component = renderKillSessionResult(
 			{
-				content: [{ type: "text", text }],
-				details: { operation: "kill_session", status: "kill_failed", running: false, found: false },
+				content: [{ type: "text", text: `${text}\nnote: ${note}` }],
+				details: { operation: "kill_session", status: "kill_failed", running: false, found: false, note },
 			} as any,
 			{ expanded: false, isPartial: false },
 			plainTheme,
 			context({}),
 		);
 		assert.equal(rendered(component, 80).trim(), text);
+	});
+
+	it("keeps collection reminders out of process error previews", () => {
+		const note = "Remember to poll and collect output of #1";
+		const component = renderProcessResult(
+			{
+				content: [
+					{ type: "text", text: "unknown session_id: 999" },
+					{ type: "text", text: `note: ${note}` },
+				],
+				details: { note },
+			},
+			{ expanded: false, isPartial: false },
+			plainTheme,
+			context({}),
+		);
+		assert.equal(rendered(component).trim(), "unknown session_id: 999");
 	});
 
 	it("list_sessions previews five entries, caches rows, and expands all entries with log numbers", () => {

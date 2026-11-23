@@ -26,7 +26,7 @@ import { Container, Text, truncateToWidth, type Component } from "@earendil-work
 import type { OnExitPolicy, OnExitStatus } from "./completion.ts";
 import { formatElapsed, formatWallTime } from "./format-time.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
-import { type KillResultDetails, type OutputResultDetails, type ProcessResultDetails, safeMeta, WAIT_CANCELLED, WAIT_STEERED } from "./tool-result.ts";
+import { type KillResultDetails, type OutputResultDetails, type ProcessResultDetails, WAIT_CANCELLED, WAIT_STEERED } from "./tool-result.ts";
 import { hexByteLength } from "./unescape.ts";
 
 type ExportedRenderCall<TState> = NonNullable<ToolDefinition<any, any, TState>["renderCall"]>;
@@ -258,7 +258,7 @@ export function renderKillSessionResult(
 	context: ToolRenderContext<RenderState, any>,
 ): Component {
 	if (result.details?.found === false) {
-		const message = sanitizeOutputText(getContentText(result)) || "No such session";
+		const message = sanitizeOutputText(getContentText(result, result.details.note)) || "No such session";
 		return new Text(`\n${theme.fg("error", message)}`, 0, 0);
 	}
 	return renderOutputResult(result, options, theme, context);
@@ -272,7 +272,7 @@ function rebuildOutputResult(
 	state: RenderState,
 ): void {
 	const details = result.details ?? {};
-	const body = sanitizeOutputText(details.output ?? getContentText(result));
+	const body = sanitizeOutputText(details.output ?? getContentText(result, details.note));
 	// Partial updates reuse the same context state and component. Width alone
 	// is not a sufficient cache key: invalidate the preview when output grows.
 	if (state.cachedBody !== body) {
@@ -332,7 +332,6 @@ function rebuildOutputResult(
 
 	const status = buildStatusLine(details, options, theme, state);
 	if (status) container.addChild(new Text(`\n${status}`, 0, 0));
-	if (details.note) container.addChild(new Text(`\n${theme.fg("muted", `note: ${safeMeta(details.note)}`)}`, 0, 0));
 }
 
 function buildStatusLine(
@@ -408,8 +407,8 @@ export function renderListSessionsResult(
 	container.clear();
 	const sessions = details.sessions;
 	const active = details.active_count ?? sessions.filter((session) => session.running).length;
-	const exited = details.just_exited_count ?? sessions.filter((session) => !session.running).length;
-	const summary = `${active} live${exited ? ` · ${exited} exited` : ""}`;
+	const justExited = details.just_exited_count ?? sessions.filter((session) => !session.running).length;
+	const summary = `${active} live${justExited ? ` · ${justExited} just exited` : ""}`;
 	container.addChild(new Text(`\n${theme.fg("muted", summary)}`, 0, 0));
 
 	if (sessions.length === 0) {
@@ -465,9 +464,13 @@ export function renderListSessionsResult(
 	return container;
 }
 
-function getContentText(result: AgentToolResult<unknown>): string {
-	return result.content
+function getContentText(result: AgentToolResult<unknown>, note?: string): string {
+	const text = result.content
 		.filter((part): part is { type: "text"; text: string } => part.type === "text")
 		.map((part) => part.text)
 		.join("\n");
+	// Error previews fall back to reply text; keep its agent-only note out.
+	if (!note) return text;
+	const suffix = `\nnote: ${note}`;
+	return text.endsWith(suffix) ? text.slice(0, -suffix.length) : text;
 }

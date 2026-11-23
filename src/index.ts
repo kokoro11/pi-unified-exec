@@ -778,7 +778,9 @@ export default function (pi: ExtensionAPI) {
 		if (!event.isError || event.structuredContent !== undefined) return;
 		if (event.toolName !== "exec_command" && event.toolName !== "write_stdin" && event.toolName !== "kill_session") return;
 		const note = ctx.store.takeExitReminder();
-		if (note) return { content: [...event.content, { type: "text", text: `note: ${note}` }] };
+		if (!note) return;
+		const details = typeof event.details === "object" ? event.details : undefined;
+		return { content: [...event.content, { type: "text", text: `note: ${note}` }], details: { ...details, note } };
 	});
 	pi.on("agent_settled", async () => {
 		ctx.steer.reset();
