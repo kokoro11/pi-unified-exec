@@ -41,7 +41,7 @@ const processScriptDetailFields = {
 	running: Type.Boolean(),
 	...outputFields,
 	note: Type.Optional(Type.String()),
-	wait_status: Type.Optional(Type.String({ description: "Plain-language guidance on what to do after the wait returns." })),
+	wait_status: Type.Optional(Type.String({ description: "Plain-language guidance present only when a wait is cancelled or steered." })),
 	on_exit: Type.Optional(Type.Union([Type.Literal("none"), Type.Literal("wake")])),
 };
 

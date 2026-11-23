@@ -31,7 +31,7 @@ const titles = {
 	cancel: "cancels without killing",
 	steer: "returns early on a typed steer without killing",
 };
-type WaitEvent = { type: "wait-start" } | { type: "wait-end"; details: { wait_status: string; running: boolean } };
+type WaitEvent = { type: "wait-start" } | { type: "wait-end"; details: { wait_status?: string; running: boolean } };
 for (const mode of ["exit", "cancel", "steer"] as const) {
 	const cancel = mode !== "exit";
 	tuiTest(`TUI: long relative wait ${titles[mode]}`, async () => {
@@ -71,7 +71,7 @@ setTimeout(() => console.log("job-finished"), ${cancel ? 30_000 : 5000});
 				await until(() => events().some(e => e.type === "wait-end"), "steer did not end the wait");
 				const end = events().find(e => e.type === "wait-end");
 				assert.ok(end);
-				assert.match(end.details.wait_status, /^Read and address the user's steering message first\./);
+				assert.match(end.details.wait_status ?? "", /^Read and address the user's steering message first\./);
 				assert.equal(end.details.running, true);
 				assert.ok(alive(pid), "a steer must leave the child alive");
 				await until(() => pane().includes("EXEC_WAIT_OK"), "steered turn not rendered");
@@ -81,13 +81,15 @@ setTimeout(() => console.log("job-finished"), ${cancel ? 30_000 : 5000});
 				await until(() => events().some(e => e.type === "wait-end"), "Esc did not detach");
 				const end = events().find(e => e.type === "wait-end");
 				assert.ok(end);
-				assert.match(end.details.wait_status, /^Follow the user's latest instruction before polling this session again\./);
+				assert.match(end.details.wait_status ?? "", /^Follow the user's latest instruction before polling this session again\./);
 				assert.equal(end.details.running, true);
 				assert.ok(alive(pid), "Esc must leave the child alive");
 			} else {
 				await until(() => pane().includes("EXEC_WAIT_OK"), "completion not rendered");
 				assert.match(pane(), /job-finished/);
-				assert.match(events().find(e => e.type === "wait-end")?.details.wait_status ?? "", /do not poll this session again\./);
+				const end = events().find(e => e.type === "wait-end");
+				assert.ok(end);
+				assert.equal(Object.hasOwn(end.details, "wait_status"), false);
 			}
 			tmux("send-keys", "-t", name, "C-c");
 			await pause(200);

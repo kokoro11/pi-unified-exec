@@ -22,7 +22,7 @@ interface ToolDef {
 		signal: AbortSignal | undefined,
 		onUpdate: any,
 		ctx: any,
-	) => Promise<{ content: Array<{ type: string; text: string }>; details: any }>;
+	) => Promise<{ content: Array<{ type: string; text: string }>; details: any; structuredContent?: any }>;
 }
 
 function makeHarness() {
@@ -160,7 +160,8 @@ describe("write_stdin yield_until", () => {
 		assert.ok(result.details.wall_time_seconds < 3, "past deadlines must poll immediately");
 		assert.equal(result.details.session_id, session_id);
 		assert.equal(result.details.wait_mode, "absolute");
-		assert.match(result.details.wait_status, /^Poll this session again if the task still needs its result\./);
+		assert.equal(Object.hasOwn(result.details, "wait_status"), false);
+		assert.equal(Object.hasOwn(result.structuredContent.details, "wait_status"), false);
 		assert.equal(result.details.running, true);
 	});
 
@@ -177,7 +178,8 @@ describe("write_stdin yield_until", () => {
 		assert.equal(r2.details.session_id, sid);
 		assert.equal(r2.details.running, false);
 		assert.equal(r2.details.wait_mode, "absolute");
-		assert.match(r2.details.wait_status, /do not poll this session again\./);
+		assert.equal(Object.hasOwn(r2.details, "wait_status"), false);
+		assert.equal(Object.hasOwn(r2.structuredContent.details, "wait_status"), false);
 		assert.equal(r2.details.completion_delivery, "direct");
 		assert.match(r2.details.yield_until, /Z$/);
 		assert.doesNotMatch(r2.content[0].text, /^(?:wait_status|tool_time_utc):/m);
@@ -203,7 +205,8 @@ describe("write_stdin attached waits", () => {
 		}, undefined, (p) => updates.push(p));
 		assert.equal(r2.details.exit_code, 0);
 		assert.equal(r2.details.wait_mode, "relative");
-		assert.match(r2.details.wait_status, /do not poll this session again\./);
+		assert.equal(Object.hasOwn(r2.details, "wait_status"), false);
+		assert.equal(Object.hasOwn(r2.structuredContent.details, "wait_status"), false);
 		assert.ok(r2.details.omitted_bytes > 1024 * 1024, "must retain head/tail, not accumulate every drained chunk");
 		assert.ok(Buffer.byteLength(r2.details.output) <= 50 * 1024);
 		assert.match(r2.details.output, /noisy-done/);
@@ -244,7 +247,8 @@ describe("write_stdin attached waits", () => {
 		const r1 = await h.call("exec_command", { cmd: "sleep 30", yield_time_ms: 250, on_exit: "wake" });
 		const r2 = await h.call("write_stdin", { session_id: r1.details.session_id });
 		assert.equal(r2.details.yield_time_ms, 5000);
-		assert.match(r2.details.wait_status, /^Poll this session again if the task still needs its result\./);
+		assert.equal(Object.hasOwn(r2.details, "wait_status"), false);
+		assert.equal(Object.hasOwn(r2.structuredContent.details, "wait_status"), false);
 		assert.equal(r2.details.wait_mode, "relative");
 		assert.equal(r2.details.running, true);
 		assert.equal(r2.details.completion_notification, "armed");
@@ -354,7 +358,7 @@ describe("exec_command on_exit", () => {
 		const sid = r1.details.session_id;
 		const r2 = await h.call("write_stdin", { session_id: sid, yield_until: inFuture(400) });
 		assert.equal(r2.details.session_id, sid);
-		assert.match(r2.details.wait_status, /^Poll this session again if the task still needs its result\./);
+		assert.equal(Object.hasOwn(r2.details, "wait_status"), false);
 		assert.equal(r2.details.wait_mode, "absolute");
 		assert.equal(r2.details.running, true);
 		assert.doesNotMatch(r2.content[0].text, /^(?:wait_status|tool_time_utc):/m);

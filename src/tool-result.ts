@@ -17,10 +17,6 @@ export type ProcessStatus = "running" | "exited";
 export type KillStatus = "killed" | "kill_failed";
 
 /** Next-step guidance shared by process results and terminal renderers. */
-export const WAIT_COMPLETED =
-	"Continue with the process's exit status and output; do not poll this session again.";
-export const WAIT_DEADLINE_REACHED =
-	"Poll this session again if the task still needs its result. The process is still running.";
 export const WAIT_CANCELLED =
 	"Follow the user's latest instruction before polling this session again. " +
 	"The wait was cancelled; the process is still running and buffering output.";
@@ -58,7 +54,7 @@ export interface ProcessResultDetails extends OutputResultDetails {
 	total_time_seconds?: number;
 	yield_time_ms?: number;
 	wait_mode?: "relative" | "absolute";
-	/** Plain-language guidance on what to do after the wait returns. */
+	/** Plain-language guidance present only when a wait is cancelled or steered. */
 	wait_status?: string;
 	yield_until?: string;
 	effective_wait_ms?: number;

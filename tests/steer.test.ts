@@ -242,7 +242,7 @@ describe("steer interrupt e2e", () => {
 
 		await h.deliver();
 		const r2 = await h.call("write_stdin", { session_id: sid, yield_until: new Date().toISOString() });
-		assert.match(r2.details.wait_status, /^Poll this session again if the task still needs its result\./);
+		assert.equal(Object.hasOwn(r2.details, "wait_status"), false);
 	});
 
 	it("releases every parallel wait in the batch", async () => {
@@ -328,7 +328,7 @@ describe("steer interrupt e2e", () => {
 			await h.steer();
 			await sleep(30);
 			const r = await h.call("write_stdin", { session_id: sid, yield_until: new Date().toISOString() });
-			assert.match(r.details.wait_status, /^Poll this session again if the task still needs its result\./);
+			assert.equal(Object.hasOwn(r.details, "wait_status"), false);
 		} finally {
 			delete process.env[STEER_INTERRUPT_ENV];
 		}

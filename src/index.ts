@@ -79,8 +79,6 @@ import {
 	type FinalizeProcessInput,
 	type ProcessResultDetails,
 	WAIT_CANCELLED,
-	WAIT_COMPLETED,
-	WAIT_DEADLINE_REACHED,
 	WAIT_STEERED,
 } from "./tool-result.ts";
 import { unescapeChars } from "./unescape.ts";
@@ -605,7 +603,6 @@ function terminalWaitExtra(
 ): Partial<ResponseShape> {
 	return {
 		wait_mode: waitMode,
-		wait_status: waitMode ? WAIT_COMPLETED : undefined,
 		completion_delivery: "direct",
 		...(wakeWasArmed ? { on_exit: "wake" as const, on_exit_wake: "consumed" as const } : {}),
 	};
@@ -664,8 +661,8 @@ async function runAttachedWait(
 		if (outcome === "exit") {
 			Object.assign(extra, terminalWaitExtra(wait.mode, armed));
 		} else {
-			extra.wait_status = outcome === "cancelled" ? WAIT_CANCELLED
-				: outcome === "steered" ? WAIT_STEERED : WAIT_DEADLINE_REACHED;
+			if (outcome === "cancelled") extra.wait_status = WAIT_CANCELLED;
+			else if (outcome === "steered") extra.wait_status = WAIT_STEERED;
 			extra.effective_wait_ms = elapsedMs;
 			extra.note = heldOpenNote(session);
 			if (armed) {

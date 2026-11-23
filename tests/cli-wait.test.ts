@@ -46,7 +46,7 @@ for (const veto of [false, true]) {
 			assert.equal(waits.length, 1, result.stdout.slice(-8000));
 			assert.equal(waits[0].isError, false, JSON.stringify(waits[0]));
 			assert.equal(waits[0].result.details.yield_time_ms, 900_000);
-			assert.match(waits[0].result.details.wait_status, /do not poll this session again\./);
+			assert.equal(Object.hasOwn(waits[0].result.details, "wait_status"), false);
 			assert.match(waits[0].result.details.output, /job-finished/);
 			assert.match(result.stdout, /EXEC_WAIT_OK/);
 			const events = readFileSync(join(root, "events.jsonl"), "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line));
