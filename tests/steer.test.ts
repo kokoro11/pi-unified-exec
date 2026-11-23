@@ -208,11 +208,13 @@ describe("steer interrupt e2e", () => {
 		setTimeout(() => void h.steer(), 200);
 		const r = await h.call("write_stdin", { session_id: sid, yield_time_ms: 600_000 });
 		assert.ok(Date.now() - t0 < 5000, `took ${Date.now() - t0} ms`);
-		assert.equal(r.details.wait_status, "interrupted_by_steer");
+		assert.match(r.details.wait_status, /^Read and address the user's steering message first\./);
 		assert.equal(r.details.session_id, sid);
 		assert.equal(r.details.running, true);
-		assert.match(r.details.note, /steering message/);
-		assert.match(r.content[0].text, /wait_status: interrupted_by_steer/);
+		assert.equal(r.structuredContent.details.wait_status, r.details.wait_status);
+		assert.match(r.content[0].text, /^wait_status: Read and address the user's steering message first\./m);
+		assert.match(r.details.wait_status, /still running and buffering output; poll this session again only if it is still relevant/);
+		assert.equal(r.details.note, undefined);
 	});
 
 	it("drains output buffered before the steer", async () => {
@@ -223,7 +225,7 @@ describe("steer interrupt e2e", () => {
 		await sleep(700);
 		await h.steer();
 		const r = await h.call("write_stdin", { session_id: sid, yield_time_ms: 600_000 });
-		assert.equal(r.details.wait_status, "interrupted_by_steer");
+		assert.match(r.details.wait_status, /^Read and address the user's steering message first\./);
 		assert.match(r.details.output, /late-line/);
 	});
 
@@ -236,11 +238,11 @@ describe("steer interrupt e2e", () => {
 		const t0 = Date.now();
 		const r = await h.call("write_stdin", { session_id: sid, yield_time_ms: 600_000 });
 		assert.ok(Date.now() - t0 < 1000);
-		assert.equal(r.details.wait_status, "interrupted_by_steer");
+		assert.match(r.details.wait_status, /^Read and address the user's steering message first\./);
 
 		await h.deliver();
 		const r2 = await h.call("write_stdin", { session_id: sid, yield_until: new Date().toISOString() });
-		assert.equal(r2.details.wait_status, "absolute_deadline_reached");
+		assert.match(r2.details.wait_status, /^Poll this session again if the task still needs its result\./);
 	});
 
 	it("releases every parallel wait in the batch", async () => {
@@ -255,8 +257,8 @@ describe("steer interrupt e2e", () => {
 			h.call("write_stdin", { session_id: b, yield_time_ms: 600_000 }),
 		]);
 		assert.ok(Date.now() - t0 < 5000);
-		assert.equal(ra.details.wait_status, "interrupted_by_steer");
-		assert.equal(rb.details.wait_status, "interrupted_by_steer");
+		assert.match(ra.details.wait_status, /^Read and address the user's steering message first\./);
+		assert.match(rb.details.wait_status, /^Read and address the user's steering message first\./);
 	});
 
 	it("interrupts an absolute yield_until wait", async () => {
@@ -268,7 +270,7 @@ describe("steer interrupt e2e", () => {
 			session_id: sid,
 			yield_until: new Date(Date.now() + 3_600_000).toISOString(),
 		});
-		assert.equal(r.details.wait_status, "interrupted_by_steer");
+		assert.match(r.details.wait_status, /^Read and address the user's steering message first\./);
 		assert.equal(r.details.wait_mode, "absolute");
 	});
 
@@ -278,7 +280,7 @@ describe("steer interrupt e2e", () => {
 		const sid = await startLongJob(h, { on_exit: "wake" });
 		setTimeout(() => void h.steer(), 150);
 		const r = await h.call("write_stdin", { session_id: sid, yield_time_ms: 600_000 });
-		assert.equal(r.details.wait_status, "interrupted_by_steer");
+		assert.match(r.details.wait_status, /^Read and address the user's steering message first\./);
 		assert.equal(r.details.completion_notification, "armed");
 	});
 
@@ -290,7 +292,7 @@ describe("steer interrupt e2e", () => {
 		const r = await h.call("exec_command", { cmd: "echo begun; sleep 30", yield_time_ms: 20_000 });
 		assert.ok(Date.now() - t0 < 5000);
 		assert.equal(typeof r.details.session_id, "number");
-		assert.equal(r.details.wait_status, "interrupted_by_steer");
+		assert.match(r.details.wait_status, /^Read and address the user's steering message first\./);
 		assert.match(r.details.output, /begun/);
 	});
 
@@ -314,7 +316,7 @@ describe("steer interrupt e2e", () => {
 		const esc = new AbortController();
 		setTimeout(() => esc.abort(), 150);
 		const r = await h.call("write_stdin", { session_id: sid, yield_time_ms: 600_000 }, { signal: esc.signal });
-		assert.equal(r.details.wait_status, "cancelled");
+		assert.match(r.details.wait_status, /^Follow the user's latest instruction before polling this session again\./);
 	});
 
 	it("is a no-op when steer interrupts are disabled", async () => {
@@ -326,7 +328,7 @@ describe("steer interrupt e2e", () => {
 			await h.steer();
 			await sleep(30);
 			const r = await h.call("write_stdin", { session_id: sid, yield_until: new Date().toISOString() });
-			assert.equal(r.details.wait_status, "absolute_deadline_reached");
+			assert.match(r.details.wait_status, /^Poll this session again if the task still needs its result\./);
 		} finally {
 			delete process.env[STEER_INTERRUPT_ENV];
 		}

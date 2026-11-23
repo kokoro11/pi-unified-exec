@@ -25,7 +25,7 @@ import { Container, Text, truncateToWidth, type Component } from "@earendil-work
 
 import { formatDurationSeconds, formatRemainingLater, formatWallTime } from "./format-time.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
-import type { KillResultDetails, OutputResultDetails, ProcessResultDetails } from "./tool-result.ts";
+import { type KillResultDetails, type OutputResultDetails, type ProcessResultDetails, WAIT_CANCELLED, WAIT_STEERED } from "./tool-result.ts";
 
 type ExportedRenderCall<TState> = NonNullable<ToolDefinition<any, any, TState>["renderCall"]>;
 type ToolRenderContext<TState = any, TArgs = any> = Parameters<ExportedRenderCall<TState>>[2] & {
@@ -407,8 +407,8 @@ function buildStatusLine(
 	if (details.yield_until && (options.isPartial || details.running)) {
 		bits.push(formatUntilLabel(details.yield_until));
 	}
-	if (details.wait_status === "cancelled") bits.push(theme.fg("warning", "cancelled"));
-	if (details.wait_status === "interrupted_by_steer") bits.push(theme.fg("accent", "steered"));
+	if (details.wait_status === WAIT_CANCELLED) bits.push(theme.fg("warning", "cancelled"));
+	if (details.wait_status === WAIT_STEERED) bits.push(theme.fg("accent", "steered"));
 	if (details.completion_notification === "armed") bits.push("wake armed");
 	if (typeof details.log === "number") bits.push(`log=${details.log}`);
 

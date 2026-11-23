@@ -66,7 +66,6 @@ import {
 	isNestedToolCall,
 	type PendingProbe,
 	STEER_NESTED_ERROR,
-	STEER_NOTE,
 	SteerGate,
 	steerInterruptEnabled,
 } from "./steer-gate.ts";
@@ -79,6 +78,10 @@ import {
 	renderKillResultText,
 	type FinalizeProcessInput,
 	type ProcessResultDetails,
+	WAIT_CANCELLED,
+	WAIT_COMPLETED,
+	WAIT_DEADLINE_REACHED,
+	WAIT_STEERED,
 } from "./tool-result.ts";
 import { unescapeChars } from "./unescape.ts";
 
@@ -234,12 +237,6 @@ const HELD_OPEN_NOTE =
  */
 function heldOpenNote(session: ExecSession): string | undefined {
 	return session.shellExited && !session.hasExited ? HELD_OPEN_NOTE : undefined;
-}
-
-/** Note for a live session whose wait ended because the human steered. */
-function steeredNote(session: ExecSession): string {
-	const held = heldOpenNote(session);
-	return held ? `${STEER_NOTE} Also: ${held}` : STEER_NOTE;
 }
 
 async function runExecCommand(
@@ -426,8 +423,8 @@ async function runExecCommand(
 				extra: {
 					on_exit: args.on_exit,
 					...(wantsWake ? { completion_notification: "armed" as const } : {}),
-					...(steered ? { wait_status: "interrupted_by_steer" as const } : {}),
-					note: steered ? steeredNote(session) : heldOpenNote(session),
+					...(steered ? { wait_status: WAIT_STEERED } : {}),
+					note: heldOpenNote(session),
 				},
 			});
 		}
@@ -590,8 +587,8 @@ async function runWriteStdin(
 			yieldTimeMs,
 			extra: {
 				...(armed ? { on_exit: "wake" as const, completion_notification: "armed" as const } : {}),
-				...(steered ? { wait_status: "interrupted_by_steer" as const } : {}),
-				note: steered ? steeredNote(session) : heldOpenNote(session),
+				...(steered ? { wait_status: WAIT_STEERED } : {}),
+				note: heldOpenNote(session),
 			},
 		});
 	} catch (err) {
@@ -608,7 +605,7 @@ function terminalWaitExtra(
 ): Partial<ResponseShape> {
 	return {
 		wait_mode: waitMode,
-		wait_status: waitMode ? ("completed" as const) : undefined,
+		wait_status: waitMode ? WAIT_COMPLETED : undefined,
 		completion_delivery: "direct",
 		...(wakeWasArmed ? { on_exit: "wake" as const, on_exit_wake: "consumed" as const } : {}),
 	};
@@ -667,11 +664,10 @@ async function runAttachedWait(
 		if (outcome === "exit") {
 			Object.assign(extra, terminalWaitExtra(wait.mode, armed));
 		} else {
-			extra.wait_status = outcome === "cancelled" ? "cancelled"
-				: outcome === "steered" ? "interrupted_by_steer"
-				: wait.mode === "relative" ? "relative_deadline_reached" : "absolute_deadline_reached";
+			extra.wait_status = outcome === "cancelled" ? WAIT_CANCELLED
+				: outcome === "steered" ? WAIT_STEERED : WAIT_DEADLINE_REACHED;
 			extra.effective_wait_ms = elapsedMs;
-			extra.note = outcome === "steered" ? steeredNote(session) : heldOpenNote(session);
+			extra.note = heldOpenNote(session);
 			if (armed) {
 				extra.on_exit = "wake";
 				extra.completion_notification = "armed";
@@ -1113,7 +1109,6 @@ export default function (pi: ExtensionAPI) {
 			"For interactive tasks, start with a brief yield (1000ms). Don't set yield too low, you still need it to boot up.",
 			`For async/background tasks, you can start with a very low yield (${MIN_YIELD_TIME_MS}ms).`,
 			"Long-running commands return a session_id (#N) you can use to drive write_stdin.",
-			'A wait with wait_status "interrupted_by_steer" ended early because the user sent a steering message; the process is still running. Address the steer first and re-poll only if it is still relevant.',
 		],
 		outputSchema: execCommandScriptResultSchema,
 		parameters: Type.Object({

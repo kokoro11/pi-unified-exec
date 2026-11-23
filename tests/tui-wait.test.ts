@@ -71,7 +71,7 @@ setTimeout(() => console.log("job-finished"), ${cancel ? 30_000 : 5000});
 				await until(() => events().some(e => e.type === "wait-end"), "steer did not end the wait");
 				const end = events().find(e => e.type === "wait-end");
 				assert.ok(end);
-				assert.equal(end.details.wait_status, "interrupted_by_steer");
+				assert.match(end.details.wait_status, /^Read and address the user's steering message first\./);
 				assert.equal(end.details.running, true);
 				assert.ok(alive(pid), "a steer must leave the child alive");
 				await until(() => pane().includes("EXEC_WAIT_OK"), "steered turn not rendered");
@@ -81,13 +81,13 @@ setTimeout(() => console.log("job-finished"), ${cancel ? 30_000 : 5000});
 				await until(() => events().some(e => e.type === "wait-end"), "Esc did not detach");
 				const end = events().find(e => e.type === "wait-end");
 				assert.ok(end);
-				assert.equal(end.details.wait_status, "cancelled");
+				assert.match(end.details.wait_status, /^Follow the user's latest instruction before polling this session again\./);
 				assert.equal(end.details.running, true);
 				assert.ok(alive(pid), "Esc must leave the child alive");
 			} else {
 				await until(() => pane().includes("EXEC_WAIT_OK"), "completion not rendered");
 				assert.match(pane(), /job-finished/);
-				assert.equal(events().find(e => e.type === "wait-end")?.details.wait_status, "completed");
+				assert.match(events().find(e => e.type === "wait-end")?.details.wait_status ?? "", /do not poll this session again\./);
 			}
 			tmux("send-keys", "-t", name, "C-c");
 			await pause(200);

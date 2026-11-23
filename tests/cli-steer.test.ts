@@ -78,7 +78,7 @@ test("actual Pi: an RPC steer ends a long poll and reaches the next turn", async
 
 		assert.ok(pollEnd, "write_stdin never finished");
 		assert.equal(pollEnd.isError, false, JSON.stringify(pollEnd));
-		assert.equal(pollEnd.result.details.wait_status, "interrupted_by_steer");
+		assert.match(pollEnd.result.details.wait_status, /^Read and address the user's steering message first\./);
 		assert.equal(pollEnd.result.details.running, true, "the child must keep running");
 		assert.ok(pollEndedAt - steerSentAt < 3000, `poll ended ${pollEndedAt - steerSentAt} ms after the steer`);
 		assert.deepEqual(assistantTexts.filter((t) => /^STEER_/.test(t)), ["STEER_SEEN"]);

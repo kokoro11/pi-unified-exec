@@ -160,7 +160,7 @@ describe("write_stdin yield_until", () => {
 		assert.ok(result.details.wall_time_seconds < 3, "past deadlines must poll immediately");
 		assert.equal(result.details.session_id, session_id);
 		assert.equal(result.details.wait_mode, "absolute");
-		assert.equal(result.details.wait_status, "absolute_deadline_reached");
+		assert.match(result.details.wait_status, /^Poll this session again if the task still needs its result\./);
 		assert.equal(result.details.running, true);
 	});
 
@@ -177,7 +177,7 @@ describe("write_stdin yield_until", () => {
 		assert.equal(r2.details.session_id, sid);
 		assert.equal(r2.details.running, false);
 		assert.equal(r2.details.wait_mode, "absolute");
-		assert.equal(r2.details.wait_status, "completed");
+		assert.match(r2.details.wait_status, /do not poll this session again\./);
 		assert.equal(r2.details.completion_delivery, "direct");
 		assert.match(r2.details.yield_until, /Z$/);
 		assert.doesNotMatch(r2.content[0].text, /^(?:wait_status|tool_time_utc):/m);
@@ -203,7 +203,7 @@ describe("write_stdin attached waits", () => {
 		}, undefined, (p) => updates.push(p));
 		assert.equal(r2.details.exit_code, 0);
 		assert.equal(r2.details.wait_mode, "relative");
-		assert.equal(r2.details.wait_status, "completed");
+		assert.match(r2.details.wait_status, /do not poll this session again\./);
 		assert.ok(r2.details.omitted_bytes > 1024 * 1024, "must retain head/tail, not accumulate every drained chunk");
 		assert.ok(Buffer.byteLength(r2.details.output) <= 50 * 1024);
 		assert.match(r2.details.output, /noisy-done/);
@@ -228,8 +228,8 @@ describe("write_stdin attached waits", () => {
 			ac.abort();
 		}
 		const r2 = await wait;
-		assert.equal(r2.details.wait_status, "cancelled");
-		assert.match(r2.content[0].text, /^wait_status: cancelled$/m);
+		assert.match(r2.details.wait_status, /^Follow the user's latest instruction before polling this session again\./);
+		assert.match(r2.content[0].text, /^wait_status: Follow the user's latest instruction before polling this session again\./m);
 		assert.equal(r2.details.wait_mode, mode);
 		assert.equal(r2.details.running, true);
 		assert.equal(r2.details.output, "");
@@ -244,7 +244,7 @@ describe("write_stdin attached waits", () => {
 		const r1 = await h.call("exec_command", { cmd: "sleep 30", yield_time_ms: 250, on_exit: "wake" });
 		const r2 = await h.call("write_stdin", { session_id: r1.details.session_id });
 		assert.equal(r2.details.yield_time_ms, 5000);
-		assert.equal(r2.details.wait_status, "relative_deadline_reached");
+		assert.match(r2.details.wait_status, /^Poll this session again if the task still needs its result\./);
 		assert.equal(r2.details.wait_mode, "relative");
 		assert.equal(r2.details.running, true);
 		assert.equal(r2.details.completion_notification, "armed");
@@ -354,7 +354,7 @@ describe("exec_command on_exit", () => {
 		const sid = r1.details.session_id;
 		const r2 = await h.call("write_stdin", { session_id: sid, yield_until: inFuture(400) });
 		assert.equal(r2.details.session_id, sid);
-		assert.equal(r2.details.wait_status, "absolute_deadline_reached");
+		assert.match(r2.details.wait_status, /^Poll this session again if the task still needs its result\./);
 		assert.equal(r2.details.wait_mode, "absolute");
 		assert.equal(r2.details.running, true);
 		assert.doesNotMatch(r2.content[0].text, /^(?:wait_status|tool_time_utc):/m);
@@ -378,7 +378,7 @@ describe("exec_command on_exit", () => {
 		const inflight = h.call("write_stdin", { session_id: sid, yield_until: inFuture(60_000) }, ac.signal);
 		setTimeout(() => ac.abort(), 150);
 		const r2 = await inflight;
-		assert.equal(r2.details.wait_status, "cancelled");
+		assert.match(r2.details.wait_status, /^Follow the user's latest instruction before polling this session again\./);
 		assert.equal(r2.details.completion_notification, "armed");
 		await h.finalizeTool(r2.toolCallId, true); // pi records the cancelled call as error
 		assert.ok(await waitFor(() => h.sentMessages.length === 1), "wake after later exit");

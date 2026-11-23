@@ -28,7 +28,7 @@ export default function (pi) {
 		const last = context.messages.at(-1);
 		const poll = context.messages.findLast((m) => m.role === "toolResult" && m.toolName === "write_stdin");
 		const steered = last?.role === "user" && /STEER-TEST-4821/.test(text(last))
-			&& poll && /wait_status: interrupted_by_steer/.test(text(poll));
+			&& poll && /wait_status: Read and address the user's steering message first\./.test(text(poll));
 		return fauxAssistantMessage(steered ? "STEER_SEEN" : "STEER_MISSING");
 	}));
 	pi.registerProvider(faux.provider);

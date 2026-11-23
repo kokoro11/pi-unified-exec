@@ -4,6 +4,7 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Replace `wait_status` outcome codes with plain-language next steps in tool replies and structured results. Put steering guidance directly in this field, remove its duplicate note and prompt guideline, and retain the terminal's short cancellation and steering badges.
 - Simplify the shared tool guidance for retrieving full command output by log number.
 - Place the shared log and Codemode rules at the end of the `write_stdin` guidance. Give Codemode separate result types: only `write_stdin` reports `total_time_seconds`, and its session ID and lifetime are required.
 - Refresh the agent-facing tool summaries and wait guidance, publish the log and Codemode rules once per prompt, and clarify that a failed kill leaves the session registered. Runtime behavior and defaults are unchanged.

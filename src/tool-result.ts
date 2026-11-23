@@ -16,6 +16,18 @@ export type ProcessOperation = "exec_command" | "write_stdin";
 export type ProcessStatus = "running" | "exited";
 export type KillStatus = "killed" | "kill_failed";
 
+/** Next-step guidance shared by process results and terminal renderers. */
+export const WAIT_COMPLETED =
+	"Continue with the process's exit status and output; do not poll this session again.";
+export const WAIT_DEADLINE_REACHED =
+	"Poll this session again if the task still needs its result. The process is still running.";
+export const WAIT_CANCELLED =
+	"Follow the user's latest instruction before polling this session again. " +
+	"The wait was cancelled; the process is still running and buffering output.";
+export const WAIT_STEERED =
+	"Read and address the user's steering message first. The process is still running and buffering output; " +
+	"poll this session again only if it is still relevant.";
+
 /** Fields shared by every result that carries child-process output. */
 export interface OutputResultDetails {
 	operation: ProcessOperation | "kill_session";
@@ -46,12 +58,8 @@ export interface ProcessResultDetails extends OutputResultDetails {
 	total_time_seconds?: number;
 	yield_time_ms?: number;
 	wait_mode?: "relative" | "absolute";
-	wait_status?:
-		| "completed"
-		| "relative_deadline_reached"
-		| "absolute_deadline_reached"
-		| "cancelled"
-		| "interrupted_by_steer";
+	/** Plain-language guidance on what to do after the wait returns. */
+	wait_status?: string;
 	yield_until?: string;
 	effective_wait_ms?: number;
 	on_exit?: OnExitPolicy;
@@ -222,7 +230,7 @@ export function renderProcessResultText(shape: ProcessResultDetails): string {
 	if (shape.signal) lines.push(`signal: ${safeMeta(shape.signal)}`);
 	if (shape.failure_message) lines.push(`failure: ${safeMeta(shape.failure_message)}`);
 	if (shape.note) lines.push(`note: ${safeMeta(shape.note)}`);
-	if (shape.wait_status === "cancelled" || shape.wait_status === "interrupted_by_steer") {
+	if (shape.wait_status === WAIT_CANCELLED || shape.wait_status === WAIT_STEERED) {
 		lines.push(`wait_status: ${shape.wait_status}`);
 	}
 	if (shape.on_exit) lines.push(`on_exit: ${safeMeta(shape.on_exit)}`);

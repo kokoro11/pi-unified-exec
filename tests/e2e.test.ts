@@ -227,7 +227,7 @@ describe("unified-exec e2e", () => {
 			assert.equal(r2.details.running, false);
 			assert.equal(r2.details.exit_code, 0);
 			assert.equal(r2.details.wait_mode, "relative");
-			assert.equal(r2.details.wait_status, "completed");
+			assert.match(r2.details.wait_status, /do not poll this session again\./);
 			assert.equal(r2.details.yield_until, undefined);
 			assert.match(r2.details.output, /long-poll-finished/);
 		} finally {
