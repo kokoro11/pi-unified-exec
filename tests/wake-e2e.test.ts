@@ -456,14 +456,14 @@ describe("exec_command on_exit", () => {
 		assert.equal(l.details.sessions[0].wake_armed, true);
 		assert.equal(l.details.sessions[0].on_exit, "wake");
 		assert.equal(l.structuredContent.sessions[0].on_exit, "wake");
-		assert.match(l.content[0].text, /^\s+on_exit: wake$/m);
+		assert.equal(JSON.parse(l.content[0].text.split("\n")[1]!).on_exit, "wake");
 
 		assert.ok(await waitFor(async () => {
 			const exited = await h.call("list_sessions", {});
 			if (exited.details.just_exited_count === 0) return false;
 			assert.equal(exited.details.sessions[0].on_exit, "consumed");
 			assert.equal(exited.structuredContent.sessions[0].on_exit, "consumed");
-			assert.match(exited.content[0].text, /^\s+on_exit: consumed$/m);
+			assert.equal(JSON.parse(exited.content[0].text.split("\n")[1]!).on_exit, "consumed");
 			return true;
 		}));
 		await sleep(400);

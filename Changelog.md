@@ -4,7 +4,8 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
-- Remind agents to collect all pending session output when a new uncollected exit appears, without changing terminal previews. Keep exited sessions available after `list_sessions` and after opening the session picker.
+- Format `list_sessions` replies as counts followed by one Codemode-compatible JSON object per line. Show counts next to the title and leave one blank line before any muted rows of session IDs, PIDs, states, and commands.
+- Remind agents to collect all pending session output when a new uncollected exit appears. Keep exited sessions available after `list_sessions` and after opening the session picker.
 - Replace `write_stdin`'s `chars_b64` with `chars_hex`. Accept mixed-case hex and ignore whitespace; reject invalid digits or incomplete bytes without writing or polling.
 - Use a 10-second default attachment window for `exec_command` and empty `write_stdin` polls; input writes default to 250 ms. All accept zero and have no built-in maximum. `PI_UNIFIED_EXEC_MAX_YIELD_MS` replaces the empty-poll-only cap and clamps both default and explicit waits across both tools.
 - Keep session status, the widget, and the picker together and share their formatting of running sessions.

@@ -28,7 +28,6 @@ import { Type, type TUnsafe } from "typebox";
 import type { CollectResult } from "./collect.ts";
 import { registerCompactCodemode } from "./codemode-render.ts";
 import { CompletionCoordinator, type OnExitPolicy, type OnExitStatus } from "./completion.ts";
-import { formatElapsed } from "./format-time.ts";
 import { type LongWaitOutcome, startRateLimitedStream, waitForExitOrDeadline } from "./long-wait.ts";
 import { OUTPUT_LOG_PATH_TEMPLATE } from "./output-log.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
@@ -55,7 +54,7 @@ import {
 } from "./script-result.ts";
 import { ExecSession } from "./session.ts";
 import { SessionStore } from "./session-store.ts";
-import { SessionUi, formatSessionCommand, formatSessionCount } from "./session-ui.ts";
+import { SessionUi, formatSessionCount } from "./session-ui.ts";
 import {
 	isNestedToolCall,
 	type PendingProbe,
@@ -1103,25 +1102,14 @@ export default function (pi: ExtensionAPI) {
 				});
 			ctx.sessionUi.refresh();
 			const active = sessions.length - exited;
-			const lines = sessions.length
-				? sessions.map((s) => {
-						const exitedSuffix = s.running
-							? ""
-							: `  [exited${s.exit_code !== undefined && s.exit_code !== null ? ` exit_code=${s.exit_code}` : ""}${s.signal ? ` signal=${s.signal}` : ""}; output available via write_stdin]`;
-						const wake = s.on_exit ? `\n        on_exit: ${s.on_exit}` : "";
-						return `  ${String(s.session_id).padStart(3)}  pid=${String(s.pid ?? "?").padStart(6)}  ${
-							s.tty ? "tty" : "pipe"
-						}  ${formatElapsed(s.elapsed_ms).padStart(8)}  ${formatSessionCommand(s.command, 60)}${exitedSuffix}${wake}${s.log ? `\n        log: ${s.log}` : ""}`;
-					})
-				: ["  (no live sessions)"];
-			const header = exited
-				? `unified-exec sessions (${active} live, ${exited} exited):`
-				: `unified-exec sessions (${active}):`;
 			const details = { sessions, active_count: active, just_exited_count: exited };
+			const structuredContent = listSessionsScriptResult(details);
+			const lines = [`active_count: ${active}, just_exited_count: ${exited}`];
+			for (const session of structuredContent.sessions) lines.push(JSON.stringify(session));
 			return {
-				content: [{ type: "text", text: `${header}\n${lines.join("\n")}` }],
+				content: [{ type: "text", text: lines.join("\n") }],
 				details,
-				structuredContent: listSessionsScriptResult(details),
+				structuredContent,
 			};
 		},
 		renderCall: renderListSessionsCall,

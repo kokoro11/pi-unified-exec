@@ -6,6 +6,7 @@ import { sliceByColumn, stripTerminalSequences } from "@earendil-works/pi-tui";
 import {
 	renderKillSessionCall,
 	renderKillSessionResult,
+	renderListSessionsCall,
 	renderListSessionsResult,
 	renderProcessResult,
 	renderWriteStdinCall,
@@ -25,7 +26,7 @@ const plainTheme = {
 	bold: (text: string) => text,
 } as Theme;
 
-// Use Pi's real color handling; only the tokens used by these footer fixtures are needed.
+// Use Pi's real color handling with only the tokens needed by the fixtures.
 const colorTheme = new Theme(
 	{
 		text: "#ffffff",
@@ -35,6 +36,7 @@ const colorTheme = new Theme(
 		warning: "#ffff00",
 		accent: "#00ffff",
 		thinkingXhigh: "#ffffff",
+		toolTitle: "#ffffff",
 	} as ConstructorParameters<typeof Theme>[0],
 	{ selectedBg: "#000000" } as ConstructorParameters<typeof Theme>[1],
 	"truecolor",
@@ -317,7 +319,7 @@ describe("unified-exec renderers", () => {
 		assert.equal(rendered(component).trim(), "unknown session_id: 999");
 	});
 
-	it("list_sessions previews five entries, caches rows, and expands all entries with log numbers", () => {
+	it("list_sessions previews five compact entries, caches rows, and expands all entries", () => {
 		const sessions = Array.from({ length: 7 }, (_, index) => ({
 			session_id: index + 1,
 			command: `sleep ${index + 1}`,
@@ -325,8 +327,9 @@ describe("unified-exec renderers", () => {
 			tty: false,
 			pid: 1000 + index,
 			elapsed_ms: 1234.56 * (index + 1),
-			running: true,
+			running: index !== 1,
 			on_exit: index === 0 ? "wake" : undefined,
+			exit_code: index === 1 ? 0 : undefined,
 			log: index + 1,
 		}));
 		let firstCommandReads = 0;
@@ -338,18 +341,28 @@ describe("unified-exec renderers", () => {
 		});
 		const result = {
 			content: [{ type: "text", text: "fallback should not render" }],
-			details: { sessions, active_count: 7, just_exited_count: 0 },
+			details: { sessions, active_count: 6, just_exited_count: 1 },
 		} as any;
 
-		const collapsed = renderListSessionsResult(result, { expanded: false, isPartial: false }, plainTheme, context({}));
-		const collapsedText = rendered(collapsed);
-		assert.match(collapsedText, /#1 /);
-		assert.match(collapsedText, /#1 pid=1000 pipe 1\.235s/);
-		assert.match(collapsedText, /on_exit=wake/);
-		assert.match(collapsedText, /#5 /);
-		assert.doesNotMatch(collapsedText, /#6 /);
-		assert.match(collapsedText, /2 more sessions/);
-		assert.match(collapsedText.toLowerCase(), /to expand/);
+		const state = {};
+		const call = renderListSessionsCall({}, colorTheme, context(state));
+		assert.equal(stripTerminalSequences(rendered(call)).trim(), "list_sessions");
+		const collapsed = renderListSessionsResult(result, { expanded: false, isPartial: false }, colorTheme, context(state));
+		assert.equal(stripTerminalSequences(rendered(call)).trim(), "list_sessions 6 live · 1 just exited");
+		const styled = rendered(collapsed);
+		const collapsedText = stripTerminalSequences(styled);
+		assert.equal(collapsedText, [
+			"",
+			"#1 pid=1000 running cmd=sleep 1",
+			"#2 pid=1001 exited cmd=sleep 2",
+			"#3 pid=1002 running cmd=sleep 3",
+			"#4 pid=1003 running cmd=sleep 4",
+			"#5 pid=1004 running cmd=sleep 5",
+		].join("\n"));
+		assert.deepEqual(
+			styled.split("\n").slice(1),
+			collapsedText.split("\n").slice(1).map((line) => colorTheme.fg("muted", line)),
+		);
 		rendered(collapsed);
 		assert.equal(firstCommandReads, 1, "same-width redraw should reuse cached rows");
 
@@ -357,11 +370,18 @@ describe("unified-exec renderers", () => {
 			result,
 			{ expanded: true, isPartial: false },
 			plainTheme,
-			context({}, collapsed),
+			context(state, collapsed),
 		);
 		const expandedText = rendered(expanded);
-		assert.match(expandedText, /#7 /);
-		assert.match(expandedText, /^  log=7$/m);
-		assert.doesNotMatch(expandedText, /more sessions/);
+		assert.equal(expandedText, `${collapsedText}\n#6 pid=1005 running cmd=sleep 6\n#7 pid=1006 running cmd=sleep 7`);
+
+		const empty = renderListSessionsResult(
+			{ content: [], details: { sessions: [] } },
+			{ expanded: false, isPartial: false },
+			plainTheme,
+			context(state, expanded),
+		);
+		assert.deepEqual(empty.render(100), []);
+		assert.equal(rendered(call).trim(), "list_sessions 0 live");
 	});
 });

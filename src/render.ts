@@ -65,22 +65,18 @@ interface DetailsShape extends Partial<OutputResultDetails> {
 interface SessionListItem {
 	session_id: number;
 	command: string;
-	cwd: string;
-	tty: boolean;
 	pid?: number;
-	elapsed_ms: number;
 	running: boolean;
-	on_exit?: OnExitStatus;
-	exit_code?: number | null;
-	signal?: string;
-	failure_message?: string;
-	log?: number;
 }
 
 interface ListSessionsDetails {
 	sessions?: SessionListItem[];
 	active_count?: number;
 	just_exited_count?: number;
+}
+
+interface ListRenderState {
+	title?: Text;
 }
 
 function markStarted(state: RenderState, executionStarted: boolean): void {
@@ -189,11 +185,16 @@ export function renderKillSessionCall(
 export function renderListSessionsCall(
 	_args: object,
 	theme: Theme,
-	context: ToolRenderContext<RenderState, object>,
+	context: ToolRenderContext<ListRenderState, object>,
 ): Component {
 	const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
-	text.setText(theme.fg("toolTitle", theme.bold("list_sessions")));
+	text.setText(listSessionsTitle(theme));
+	context.state.title = text;
 	return text;
+}
+
+function listSessionsTitle(theme: Theme, summary?: string): string {
+	return theme.fg("toolTitle", theme.bold("list_sessions")) + (summary ? theme.fg("muted", ` ${summary}`) : "");
 }
 
 function stringifyChars(chars: string): string {
@@ -395,7 +396,7 @@ export function renderListSessionsResult(
 	result: AgentToolResult<ListSessionsDetails>,
 	options: ToolRenderResultOptions,
 	theme: Theme,
-	context: ToolRenderContext<RenderState, any>,
+	context: ToolRenderContext<ListRenderState, object>,
 ): Component {
 	const details = result.details;
 	if (!details?.sessions) {
@@ -409,46 +410,25 @@ export function renderListSessionsResult(
 	const active = details.active_count ?? sessions.filter((session) => session.running).length;
 	const justExited = details.just_exited_count ?? sessions.filter((session) => !session.running).length;
 	const summary = `${active} live${justExited ? ` · ${justExited} just exited` : ""}`;
-	container.addChild(new Text(`\n${theme.fg("muted", summary)}`, 0, 0));
+	context.state.title?.setText(listSessionsTitle(theme, summary));
 
-	if (sessions.length === 0) {
-		container.addChild(new Text(`\n${theme.fg("muted", "(no live sessions)")}`, 0, 0));
-	} else {
+	if (sessions.length > 0) {
 		// A settled transcript row is rendered on every host redraw (including
 		// unrelated streaming and typing). Cache its bounded inventory by width
 		// so long command strings are sanitized and wrapped only when needed.
+		const visible = options.expanded ? sessions.length : Math.min(sessions.length, LIST_PREVIEW_SESSIONS);
 		let cachedWidth: number | undefined;
 		let cachedLines: string[] | undefined;
 		container.addChild({
 			render: (width: number): string[] => {
 				if (cachedLines && cachedWidth === width) return cachedLines;
-				const shown = options.expanded ? sessions : sessions.slice(0, LIST_PREVIEW_SESSIONS);
-				const lines: string[] = [""];
-				for (const session of shown) {
-					const state = session.running
-						? theme.fg("success", "running")
-						: theme.fg(
-								"muted",
-								session.exit_code !== undefined
-									? `exited=${session.exit_code}`
-									: `signal=${safeOneLine(session.signal ?? "?")}`,
-							);
-					const wake = session.on_exit ? theme.fg("muted", ` on_exit=${session.on_exit}`) : "";
+				const lines = [""];
+				for (let i = 0; i < visible; i++) {
+					const session = sessions[i]!;
+					const state = session.running ? "running" : "exited";
 					const command = safeOneLine(session.command, 100);
-					const line = `#${session.session_id} pid=${session.pid ?? "?"} ${session.tty ? "tty" : "pipe"} ${formatElapsed(session.elapsed_ms)} ${state}${wake} ${command}`;
-					lines.push(truncateToWidth(line, width, "..."));
-					if (options.expanded && typeof session.log === "number") {
-						lines.push(
-							truncateToWidth(theme.fg("muted", `  log=${session.log}`), width, "..."),
-						);
-					}
-				}
-				if (!options.expanded && sessions.length > shown.length) {
-					const hidden = sessions.length - shown.length;
-					const hint =
-						theme.fg("muted", `... (${hidden} more sessions,`) +
-						` ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
-					lines.push(truncateToWidth(hint, width, "..."));
+					const line = `#${session.session_id} pid=${session.pid ?? "?"} ${state} cmd=${command}`;
+					lines.push(theme.fg("muted", truncateToWidth(line, width, "...")));
 				}
 				cachedWidth = width;
 				cachedLines = lines;

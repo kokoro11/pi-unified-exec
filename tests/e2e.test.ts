@@ -1063,13 +1063,17 @@ describe("unified-exec e2e", () => {
 			assert.equal(entry.session_id, sid);
 			assert.equal(entry.running, false);
 			assert.equal(entry.exit_code, 0);
-			assert.match(listed.content[0].text, /output available via write_stdin/);
+			const [header, ...rows] = listed.content[0].text.split("\n");
+			assert.equal(header, "active_count: 0, just_exited_count: 1");
+			assert.deepEqual(rows.map((row) => JSON.parse(row)), [entry]);
 
 			const collected = await h.call("write_stdin", { session_id: sid, yield_time_ms: 0 });
 			assert.equal(collected.details.running, false);
 			assert.equal(collected.details.output, "final output\n");
 			assert.equal(collected.details.note, undefined);
-			assert.equal((await h.call("list_sessions", {})).details.sessions.length, 0);
+			const empty = await h.call("list_sessions", {});
+			assert.equal(empty.details.sessions.length, 0);
+			assert.equal(empty.content[0].text, "active_count: 0, just_exited_count: 0");
 		} finally {
 			await h.emit("session_shutdown");
 		}

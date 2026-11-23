@@ -51,7 +51,7 @@ Use `chars_hex` to write arbitrary bytes, including values above `0x7F`. Both `1
 | Tool | Parameters | Result |
 | --- | --- | --- |
 | `kill_session` | `session_id`, optional `signal` (default `SIGTERM`) | Suppress a pending wake and stop the child. On POSIX, escalate to `SIGKILL` after two seconds as needed. On Windows, force-terminate the session's Job Object, including descendants whose parents have exited. An unconfirmed kill leaves the session registered. |
-| `list_sessions` | None | Include `session_id`, `running`, and `wake_armed`, plus `on_exit` and `log` when applicable. Exited sessions stay listed until their final output is collected or the session is evicted. |
+| `list_sessions` | None | Print `active_count` and `just_exited_count` on the first line, then one JSON object per session, matching the Codemode `sessions` entries. Exited sessions stay listed until their final output is collected or the session is evicted. |
 
 `kill_session` reports `[killed #N]` or `[kill failed #N]`. For a known session, `total_time` covers its lifetime from launch and stops at exit; `wall_time` measures the kill call. The text shows a PID only while the session remains running, and reports `escalated` only when true. A missing session reports `[kill failed #N]` with a failure message and omits its unknown lifetime.
 
@@ -63,7 +63,7 @@ Tool replies and Codemode details report `on_exit: "wake"` while a wake is activ
 
 ## Output and logs
 
-Text durations use whole milliseconds below 1s, up to four significant digits below 1000s, and whole seconds from 1000s. Terminal previews, wait labels, session lists, widgets, pickers, and wake messages share this format. Script details retain their numeric units.
+Text durations use whole milliseconds below 1s, up to four significant digits below 1000s, and whole seconds from 1000s. Terminal previews, wait labels, widgets, pickers, and wake messages share this format. Session listings and script details retain their numeric units.
 
 `exec_command`, `write_stdin`, and `kill_session` include the output collected by that call. When there is no output to show, the text says `(no output)` and Codemode's `details.output` is an empty string. Results show up to 50 KiB or 2,000 lines of terminal-safe text. More than 1 MiB of output between drains can also leave a gap in the in-memory buffer. Expand a collapsed result with Pi's `app.tools.expand` binding (Ctrl+O by default) to see the full **bounded** result.
 
