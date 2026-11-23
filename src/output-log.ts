@@ -5,7 +5,7 @@ export const MIN_LOG_BYTES = 512;
 const LOG_DIRECTORY = ".temp/pi-unified-exec";
 const LOG_EXTENSION = ".log";
 export const OUTPUT_LOG_DIRECTORY = resolve(LOG_DIRECTORY);
-export const OUTPUT_LOG_PATH_TEMPLATE = `${LOG_DIRECTORY}/<log>${LOG_EXTENSION}`;
+export const OUTPUT_LOG_PATH_TEMPLATE = `${LOG_DIRECTORY}/<log number>${LOG_EXTENSION}`;
 
 /** Allocate numbers from the existing archive; reserve each file exclusively. */
 export class OutputLogDirectory {

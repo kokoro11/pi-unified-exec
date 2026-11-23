@@ -949,10 +949,11 @@ export default function (pi: ExtensionAPI) {
 		promptSnippet: "Send input, poll or collect output, or change a session's wake policy",
 		promptGuidelines: [
 			"write_stdin: Don't use chars and chars_hex at the same time.",
+			"write_stdin: Don't poll a session you already saw exited.",
 			'write_stdin: Only set on_exit to "wake" when the human asks for auto-resume. To disarm a pending wake promptly, use on_exit: "none" with just the session ID. An exit collected by a poll consumes its wake.',
 			"write_stdin: In tty sessions, submit lines with \\r (the Enter key) rather than \\n: POSIX terminals accept both, but Windows console programs only execute input on \\r.",
 			"exec_command & write_stdin: For very noisy jobs, rely on the log and final/truncated output instead of repeatedly polling.",
-			`exec_command, write_stdin, kill_session, list_sessions: If the tool output contains a log number, you can read ${OUTPUT_LOG_PATH_TEMPLATE.replace("<log>", "<log number>")} under Pi's cwd for the full command output`,
+			`exec_command, write_stdin, kill_session, list_sessions: If the tool output contains a log number, you can read ${OUTPUT_LOG_PATH_TEMPLATE} under Pi's cwd for the full command output.`,
 			"exec_command, write_stdin & kill_session: In codemode, results are { details, text }. Use r.details for structured data such as status and session_id, or call text(r.text) to display the formatted reply.",
 		],
 		outputSchema: writeStdinScriptResultSchema,
