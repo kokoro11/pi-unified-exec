@@ -10,6 +10,7 @@ import { Type, type Static } from "typebox";
 import type { OnExitStatus } from "./completion.ts";
 import {
 	type KillResultDetails,
+	type OutputResultDetails,
 	type ProcessResultDetails,
 	renderKillResultText,
 	renderProcessResultText,
@@ -79,19 +80,25 @@ export const writeStdinScriptResultSchema = Type.Object({
 });
 export type WriteStdinScriptResult = Static<typeof writeStdinScriptResultSchema>;
 
+function scriptOutputDetails(shape: OutputResultDetails) {
+	return {
+		output: shape.output,
+		truncated: shape.truncation?.truncated === true,
+		omitted_bytes: shape.omitted_bytes || undefined,
+		exit_code: shape.exit_code,
+		signal: optionalMeta(shape.signal),
+		failure_message: optionalMeta(shape.failure_message),
+		log: shape.log,
+		wall_time_seconds: shape.wall_time_seconds,
+	};
+}
+
 function processScriptResult<T extends Record<string, unknown>>(shape: ProcessResultDetails, fields: T) {
 	return {
 		details: compact(Object.assign({
 			status: shape.status,
 			running: shape.running,
-			output: shape.output,
-			truncated: shape.truncation?.truncated === true,
-			omitted_bytes: shape.omitted_bytes || undefined,
-			exit_code: shape.exit_code,
-			signal: optionalMeta(shape.signal),
-			failure_message: optionalMeta(shape.failure_message),
-			log: shape.log,
-			wall_time_seconds: shape.wall_time_seconds,
+		}, scriptOutputDetails(shape), {
 			note: optionalMeta(shape.note),
 			wait_status: shape.wait_status,
 		}, fields)),
@@ -136,7 +143,7 @@ export type KillScriptResult = Static<typeof killScriptResultSchema>;
 
 export function killScriptResult(shape: KillResultDetails): KillScriptResult {
 	return {
-		details: compact({
+		details: compact(Object.assign({
 			status: shape.status,
 			found: true,
 			running: shape.running,
@@ -145,15 +152,7 @@ export function killScriptResult(shape: KillResultDetails): KillScriptResult {
 			pid: shape.pid,
 			total_time_seconds: shape.total_time_seconds,
 			on_exit: shape.on_exit,
-			output: shape.output,
-			truncated: shape.truncation?.truncated === true,
-			omitted_bytes: shape.omitted_bytes || undefined,
-			exit_code: shape.exit_code,
-			signal: optionalMeta(shape.signal),
-			failure_message: optionalMeta(shape.failure_message),
-			log: shape.log,
-			wall_time_seconds: shape.wall_time_seconds,
-		}),
+		}, scriptOutputDetails(shape))),
 		text: renderKillResultText(shape),
 	};
 }

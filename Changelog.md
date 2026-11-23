@@ -4,6 +4,8 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Share result assembly across command launches, input writes, polls, and kills while keeping tool replies and wake behavior unchanged.
+- Simplify session eviction to scan only the unprotected entries, still preferring the oldest exited session.
 - Clarify session IDs, polling, and kill outcomes in the tool descriptions.
 - Shorten the `write_stdin` `on_exit` parameter description.
 - Remove `effective_wait_ms` from `write_stdin` results. Use `wall_time_seconds` for the call's duration.

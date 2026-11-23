@@ -11,7 +11,7 @@
  * terminate-all-on-shutdown. The ExecSession itself drives its child.
  */
 
-import { ExecSession } from "./session.ts";
+import type { ExecSession } from "./session.ts";
 
 export interface SessionStoreOptions {
 	maxSessions: number;
@@ -55,10 +55,7 @@ export class SessionStore {
 	 * new session would exceed the cap, prune an LRU non-protected entry first.
 	 */
 	insert(session: ExecSession): { pruned?: ExecSession; count: number } {
-		let pruned: ExecSession | undefined;
-		if (this.sessions.size >= this.maxSessions) {
-			pruned = this.pruneLru() ?? undefined;
-		}
+		const pruned = this.sessions.size >= this.maxSessions ? this.pruneLru() : undefined;
 		this.sessions.set(session.id, session);
 		return { pruned, count: this.sessions.size };
 	}
@@ -73,16 +70,9 @@ export class SessionStore {
 
 	/** Terminate all sessions and clear the store. Used on session_shutdown. */
 	terminateAll(): ExecSession[] {
-		const drained = Array.from(this.sessions.values());
+		const drained = this.values();
 		this.sessions.clear();
-		for (const s of drained) {
-			try {
-				s.terminate();
-			} catch {
-				// ignore
-			}
-			this.onEvict?.(s, "shutdown");
-		}
+		for (const session of drained) this.terminateEvicted(session, "shutdown");
 		return drained;
 	}
 
@@ -92,28 +82,29 @@ export class SessionStore {
 	 *   2. Among unprotected: prefer already-exited entries (oldest first).
 	 *   3. Otherwise: oldest unprotected entry, alive or not.
 	 */
-	private pruneLru(): ExecSession | null {
-		const entries = Array.from(this.sessions.values());
-		if (entries.length === 0) return null;
+	private pruneLru(): ExecSession | undefined {
+		const byRecency = this.values().sort((a, b) => a.lastUsed - b.lastUsed);
+		const unprotectedCount = byRecency.length - Math.max(0, this.lruProtectedCount);
+		if (unprotectedCount <= 0) return undefined;
 
-		// One ascending sort: the last N entries are the protected (most recent) set.
-		const byRecencyAsc = [...entries].sort((a, b) => a.lastUsed - b.lastUsed);
-		const protectedIds = new Set<number>(
-			this.lruProtectedCount > 0 ? byRecencyAsc.slice(-this.lruProtectedCount).map((e) => e.id) : [],
-		);
-
-		// Prefer oldest exited entries first.
-		const exitedCandidate = byRecencyAsc.find((e) => !protectedIds.has(e.id) && e.hasExited);
-		const victim = exitedCandidate ?? byRecencyAsc.find((e) => !protectedIds.has(e.id));
-		if (!victim) return null;
-
+		let victim = byRecency[0]!;
+		for (let i = 0; i < unprotectedCount; i++) {
+			const candidate = byRecency[i]!;
+			if (!candidate.hasExited) continue;
+			victim = candidate;
+			break;
+		}
 		this.sessions.delete(victim.id);
+		this.terminateEvicted(victim, "lru");
+		return victim;
+	}
+
+	private terminateEvicted(session: ExecSession, reason: "lru" | "shutdown"): void {
 		try {
-			victim.terminate();
+			session.terminate();
 		} catch {
 			// ignore
 		}
-		this.onEvict?.(victim, "lru");
-		return victim;
+		this.onEvict?.(session, reason);
 	}
 }

@@ -115,7 +115,7 @@ describe.skipIf(IS_WINDOWS)("held-open session diagnostics", () => {
 			signal: null,
 			failure: null,
 			tty: false,
-			extra: { note: HELD_OPEN_NOTE },
+			metadata: { note: HELD_OPEN_NOTE },
 		});
 		const runningText = renderProcessResultText(running);
 		assert.match(runningText, /^\[running #7\]\n/);

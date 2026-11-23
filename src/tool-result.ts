@@ -6,9 +6,11 @@ import {
 	type TruncationResult,
 } from "@earendil-works/pi-coding-agent";
 
+import type { CollectResult } from "./collect.ts";
 import type { OnExitStatus } from "./completion.ts";
 import { formatWallTime } from "./format-time.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
+import type { ExecSession } from "./session.ts";
 
 const textDecoder = new TextDecoder("utf-8", { fatal: false });
 
@@ -71,47 +73,38 @@ export interface KillResultDetails extends OutputResultDetails {
 	escalated: boolean;
 }
 
-interface OutputEnvelopeInput {
+interface OutputResultInput {
 	wallTimeSec: number;
 	collected: Uint8Array;
 	log?: number;
 	/** Middle bytes dropped by the retention cap during this call's drain. */
 	omittedBytes?: number;
-}
-
-export interface FinalizeProcessInput extends OutputEnvelopeInput {
-	operation: ProcessOperation;
-	running: boolean;
-	sessionId: number | undefined;
 	exitCode: number | null | undefined;
 	signal: NodeJS.Signals | null;
 	failure: string | null;
 	tty: boolean;
 	cwd?: string;
 	command?: string;
-	yieldTimeMs?: number;
-	/** Long-wait / wake metadata merged into the result (undefined values skipped). */
-	extra?: Partial<ProcessResultDetails>;
 }
 
-export interface FinalizeKillInput extends OutputEnvelopeInput {
+export type ProcessResultMetadata = Pick<ProcessResultDetails, "completion_delivery" | "on_exit" | "wait_status" | "note">;
+
+interface FinalizeProcessInput extends OutputResultInput {
+	operation: ProcessOperation;
+	running: boolean;
+	sessionId: number | undefined;
+	yieldTimeMs?: number;
+	metadata?: ProcessResultMetadata;
+}
+
+interface FinalizeKillInput extends OutputResultInput {
 	sessionId: number;
 	totalTimeSec: number;
 	pid?: number;
 	requestedSignal: NodeJS.Signals;
-	exitCode: number | null | undefined;
-	signal: NodeJS.Signals | null;
-	failure: string | null;
-	tty: boolean;
-	cwd?: string;
-	command?: string;
 	escalated: boolean;
 	killed: boolean;
 	onExit?: OnExitStatus;
-}
-
-function decode(bytes: Uint8Array): string {
-	return textDecoder.decode(bytes);
 }
 
 export function safeMeta(value: string, max = 4096): string {
@@ -129,8 +122,8 @@ export function safeMeta(value: string, max = 4096): string {
 
 type OutputEnvelope = Pick<OutputResultDetails, "wall_time_seconds" | "output" | "log" | "truncation" | "omitted_bytes">;
 
-function createOutputEnvelope(input: OutputEnvelopeInput): OutputEnvelope {
-	const safeText = sanitizeOutputText(decode(input.collected));
+function createOutputEnvelope(input: OutputResultInput): OutputEnvelope {
+	const safeText = sanitizeOutputText(textDecoder.decode(input.collected));
 	const truncation = truncateTail(safeText, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
 	const envelope: OutputEnvelope = {
 		wall_time_seconds: input.wallTimeSec,
@@ -140,6 +133,14 @@ function createOutputEnvelope(input: OutputEnvelopeInput): OutputEnvelope {
 	if (input.omittedBytes) envelope.omitted_bytes = input.omittedBytes;
 	if (truncation.truncated) envelope.truncation = truncation;
 	return envelope;
+}
+
+function addProcessMetadata(shape: OutputResultDetails, input: OutputResultInput): void {
+	if (input.exitCode != null) shape.exit_code = input.exitCode;
+	if (input.signal) shape.signal = input.signal;
+	if (input.failure) shape.failure_message = input.failure;
+	if (input.cwd) shape.cwd = input.cwd;
+	if (input.command) shape.command = input.command;
 }
 
 export function finalizeProcessResult(input: FinalizeProcessInput): ProcessResultDetails {
@@ -152,18 +153,39 @@ export function finalizeProcessResult(input: FinalizeProcessInput): ProcessResul
 		tty: input.tty,
 	};
 	if (input.sessionId !== undefined) shape.session_id = input.sessionId;
-	if (input.exitCode !== undefined && input.exitCode !== null) shape.exit_code = input.exitCode;
-	if (input.signal) shape.signal = input.signal;
-	if (input.failure) shape.failure_message = input.failure;
-	if (input.cwd) shape.cwd = input.cwd;
-	if (input.command) shape.command = input.command;
+	addProcessMetadata(shape, input);
 	if (input.yieldTimeMs) shape.yield_time_ms = input.yieldTimeMs;
-	if (input.extra) {
-		for (const [key, value] of Object.entries(input.extra)) {
-			if (value !== undefined) (shape as unknown as Record<string, unknown>)[key] = value;
-		}
-	}
+	const metadata = input.metadata;
+	if (metadata?.completion_delivery !== undefined) shape.completion_delivery = metadata.completion_delivery;
+	if (metadata?.on_exit !== undefined) shape.on_exit = metadata.on_exit;
+	if (metadata?.wait_status !== undefined) shape.wait_status = metadata.wait_status;
+	if (metadata?.note !== undefined) shape.note = metadata.note;
 	return shape;
+}
+
+export function finalizeSessionResult(
+	session: ExecSession,
+	collected: CollectResult,
+	input: Pick<FinalizeProcessInput, "operation" | "running" | "wallTimeSec" | "failure" | "yieldTimeMs" | "metadata">,
+): ProcessResultDetails {
+	const { operation, running, wallTimeSec, failure, yieldTimeMs, metadata } = input;
+	return finalizeProcessResult({
+		operation,
+		running,
+		wallTimeSec,
+		collected: collected.bytes,
+		omittedBytes: collected.omittedBytes,
+		sessionId: running || operation === "write_stdin" ? session.id : undefined,
+		exitCode: running ? undefined : session.exitCode,
+		signal: running ? null : session.signal,
+		failure,
+		tty: session.tty,
+		log: session.log,
+		cwd: session.cwd,
+		command: session.displayCommand,
+		yieldTimeMs,
+		metadata,
+	});
 }
 
 export function finalizeKillResult(input: FinalizeKillInput): KillResultDetails {
@@ -182,11 +204,7 @@ export function finalizeKillResult(input: FinalizeKillInput): KillResultDetails 
 	};
 	if (input.pid !== undefined) shape.pid = input.pid;
 	if (input.onExit) shape.on_exit = input.onExit;
-	if (input.exitCode !== undefined && input.exitCode !== null) shape.exit_code = input.exitCode;
-	if (input.signal) shape.signal = input.signal;
-	if (input.failure) shape.failure_message = input.failure;
-	if (input.cwd) shape.cwd = input.cwd;
-	if (input.command) shape.command = input.command;
+	addProcessMetadata(shape, input);
 	return shape;
 }
 
@@ -213,27 +231,31 @@ function appendOutputSection(lines: string[], shape: OutputResultDetails): strin
 	return `${header}\n---\n${body}${footer}`;
 }
 
-function appendWallTime(lines: string[], seconds: number): void {
-	const wallTime = formatWallTime(seconds);
+function appendExitDiagnostics(lines: string[], shape: OutputResultDetails): void {
+	if (shape.signal) lines.push(`signal: ${safeMeta(shape.signal)}`);
+	if (shape.failure_message) lines.push(`failure: ${safeMeta(shape.failure_message)}`);
+}
+
+function finishOutputResult(lines: string[], shape: OutputResultDetails): string {
+	if (shape.on_exit) lines.push(`on_exit: ${shape.on_exit}`);
+	if (shape.log && !shape.truncation?.truncated) lines.push(`log: ${shape.log}`);
+	const wallTime = formatWallTime(shape.wall_time_seconds);
 	if (wallTime !== "0ms") lines.push(`wall_time: ${wallTime}`);
+	if (shape.total_time_seconds !== undefined) lines.push(`total_time: ${formatWallTime(shape.total_time_seconds)}`);
+	if (shape.omitted_bytes) lines.push(`omitted_bytes: ${shape.omitted_bytes}`);
+	return appendOutputSection(lines, shape);
 }
 
 export function renderProcessResultText(shape: ProcessResultDetails): string {
 	const id = shape.session_id === undefined ? "" : ` #${shape.session_id}`;
 	const outcome = shape.exit_code === 0 ? "ok" : shape.exit_code === undefined ? "error" : `error ${shape.exit_code}`;
 	const lines = [shape.running ? `[running${id}]` : `[exited${id} ${outcome}]`];
-	if (shape.signal) lines.push(`signal: ${safeMeta(shape.signal)}`);
-	if (shape.failure_message) lines.push(`failure: ${safeMeta(shape.failure_message)}`);
+	appendExitDiagnostics(lines, shape);
 	if (shape.note) lines.push(`note: ${safeMeta(shape.note)}`);
 	if (shape.wait_status === WAIT_CANCELLED || shape.wait_status === WAIT_STEERED) {
 		lines.push(`wait_status: ${shape.wait_status}`);
 	}
-	if (shape.on_exit) lines.push(`on_exit: ${shape.on_exit}`);
-	if (shape.log && !shape.truncation?.truncated) lines.push(`log: ${shape.log}`);
-	appendWallTime(lines, shape.wall_time_seconds);
-	if (shape.total_time_seconds !== undefined) lines.push(`total_time: ${formatWallTime(shape.total_time_seconds)}`);
-	if (shape.omitted_bytes) lines.push(`omitted_bytes: ${shape.omitted_bytes}`);
-	return appendOutputSection(lines, shape);
+	return finishOutputResult(lines, shape);
 }
 
 export function renderKillResultText(shape: KillResultDetails): string {
@@ -242,12 +264,6 @@ export function renderKillResultText(shape: KillResultDetails): string {
 	if (shape.running && shape.pid !== undefined) lines.push(`pid: ${shape.pid}`);
 	if (shape.escalated) lines.push("escalated: true");
 	if (shape.exit_code !== undefined) lines.push(`exit_code: ${shape.exit_code}`);
-	if (shape.signal) lines.push(`signal: ${safeMeta(shape.signal)}`);
-	if (shape.failure_message) lines.push(`failure: ${safeMeta(shape.failure_message)}`);
-	if (shape.on_exit) lines.push(`on_exit: ${shape.on_exit}`);
-	if (shape.log && !shape.truncation?.truncated) lines.push(`log: ${shape.log}`);
-	appendWallTime(lines, shape.wall_time_seconds);
-	lines.push(`total_time: ${formatWallTime(shape.total_time_seconds)}`);
-	if (shape.omitted_bytes) lines.push(`omitted_bytes: ${shape.omitted_bytes}`);
-	return appendOutputSection(lines, shape);
+	appendExitDiagnostics(lines, shape);
+	return finishOutputResult(lines, shape);
 }

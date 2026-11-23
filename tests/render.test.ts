@@ -234,7 +234,7 @@ describe("unified-exec renderers", () => {
 			signal: null,
 			failure: null,
 			tty: false,
-			extra: { on_exit: "wake" },
+			metadata: { on_exit: "wake" },
 		});
 		const firstResult = {
 			content: [{ type: "text", text: renderProcessResultText(firstDetails) }],
@@ -255,8 +255,8 @@ describe("unified-exec renderers", () => {
 			failure: null,
 			tty: false,
 			log: 80,
-			extra: { total_time_seconds: 1.25 },
 		});
+		nextDetails.total_time_seconds = 1.25;
 		const nextResult = {
 			content: [{ type: "text", text: renderProcessResultText(nextDetails) }],
 			details: nextDetails,

@@ -12,27 +12,9 @@ import { SessionStore } from "../src/session-store.ts";
 import type { ExecSession } from "../src/session.ts";
 
 class StubSession {
-	readonly id: number;
-	private lastUsedAt: number;
-	private exited: boolean;
 	terminatedWith: NodeJS.Signals | null = null;
-	constructor(id: number, lastUsed: number, exited = false) {
-		this.id = id;
-		this.lastUsedAt = lastUsed;
-		this.exited = exited;
-	}
-	get lastUsed(): number {
-		return this.lastUsedAt;
-	}
-	get hasExited(): boolean {
-		return this.exited;
-	}
-	setExited() {
-		this.exited = true;
-	}
-	setLastUsed(ms: number) {
-		this.lastUsedAt = ms;
-	}
+	constructor(readonly id: number, readonly lastUsed: number, readonly hasExited = false) {}
+
 	terminate(signal: NodeJS.Signals = "SIGTERM") {
 		this.terminatedWith = signal;
 	}
@@ -43,9 +25,12 @@ function stub(id: number, lastUsed: number, exited = false): ExecSession {
 }
 
 describe("SessionStore", () => {
-	it("allocates monotonic ids starting at 1", () => {
+	it("allocates sequential ids starting at 1 without reusing removed ids", () => {
 		const store = new SessionStore({ maxSessions: 10, lruProtectedCount: 2 });
-		assert.equal(store.allocateId(), 1);
+		const id = store.allocateId();
+		assert.equal(id, 1);
+		store.insert(stub(id, 1000));
+		store.remove(id);
 		assert.equal(store.allocateId(), 2);
 		assert.equal(store.allocateId(), 3);
 	});
@@ -82,8 +67,7 @@ describe("SessionStore", () => {
 		store.insert(c);
 		const d = stub(4, 4000);
 		const { pruned } = store.insert(d);
-		assert.ok(pruned, "expected a pruned entry");
-		assert.equal(pruned!.id, 1, `expected id=1 evicted, got id=${pruned!.id}`);
+		assert.equal(pruned, a);
 		assert.equal(store.size, 3);
 	});
 
@@ -95,21 +79,20 @@ describe("SessionStore", () => {
 		store.insert(stub(3, 3000)); // newest → protected
 		const d = stub(4, 4000);
 		const { pruned } = store.insert(d);
-		assert.equal(pruned!.id, 1);
+		assert.equal(pruned?.id, 1);
 	});
 
-	it("protects the N most recent entries", () => {
-		// cap=5, protected=3. Oldest 2 unprotected. Even though older exist, only unprotected evicted.
-		const store = new SessionStore({ maxSessions: 5, lruProtectedCount: 3 });
-		store.insert(stub(1, 1000, /*exited*/ true));
+	it("protects recently used entries even if they exited", () => {
+		const store = new SessionStore({ maxSessions: 4, lruProtectedCount: 2 });
+		const protectedExit = stub(1, 3000, true);
+		store.insert(protectedExit);
 		store.insert(stub(2, 2000));
-		store.insert(stub(3, 3000));
+		const oldest = stub(3, 1000);
+		store.insert(oldest);
 		store.insert(stub(4, 4000));
-		store.insert(stub(5, 5000)); // most recent (protected)
-		const newEntry = stub(6, 6000);
-		const { pruned } = store.insert(newEntry);
-		// id 3, 4, 5 are protected (3 most recent). id 1 (exited) is the victim.
-		assert.equal(pruned!.id, 1);
+		const { pruned } = store.insert(stub(5, 5000));
+		assert.equal(pruned, oldest);
+		assert.equal(store.get(protectedExit.id), protectedExit);
 	});
 
 	it("terminates evicted session", () => {
@@ -149,12 +132,5 @@ describe("SessionStore", () => {
 		store.terminateAll();
 		const reasons = events.slice(1).map((e) => e.reason).sort();
 		assert.deepEqual(reasons, ["shutdown", "shutdown"]);
-	});
-
-	it("allocateId is monotonic (ids are never reused)", () => {
-		const store = new SessionStore({ maxSessions: 5, lruProtectedCount: 1 });
-		const id = store.allocateId();
-		const next = store.allocateId();
-		assert.ok(next > id);
 	});
 });
