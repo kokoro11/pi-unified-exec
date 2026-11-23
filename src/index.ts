@@ -1068,9 +1068,9 @@ export default function (pi: ExtensionAPI) {
 		promptSnippet: "Run a routine shell command or an async/interactive task",
 		promptGuidelines: [
 			`exec_command: For routine commands do not set yield_time_ms to below ${DEFAULT_EXEC_YIELD_MS}, unless it's a background/async/interactive task. The yield_time_ms of the final write_stdin should also not be set below ${DEFAULT_EXEC_YIELD_MS}.`,
-			"For interactive tasks, start with a brief yield (1000ms). Don't set yield too low, you still need it to boot up.",
-			`For async/background tasks, you can start with a very low yield (${MIN_YIELD_TIME_MS}ms).`,
-			"Long-running commands return a session_id (#N) you can use to drive write_stdin.",
+			"exec_command: For interactive tasks, start with a brief yield (1000ms). Don't set yield too low, you still need it to boot up.",
+			`exec_command: For async/background tasks, you can start with a very low yield (${MIN_YIELD_TIME_MS}ms).`,
+			"exec_command: Long-running commands return a session_id (#N) you can use to drive write_stdin.",
 		],
 		outputSchema: execCommandScriptResultSchema,
 		parameters: Type.Object({
@@ -1127,12 +1127,12 @@ export default function (pi: ExtensionAPI) {
 			"Write bytes to a running session. Omit both chars and chars_b64 to poll without writing. Use `chars` for text with C-style escapes (e.g. \\x03 Ctrl-C, \\x1b ESC, \\n newline); use `chars_b64` for raw binary. For empty polls, wait with a finite yield_time_ms (relative, no built-in maximum). The reply keeps the session ID at exit; only poll again if it reports `[running #N]`.",
 		promptSnippet: "Send input, poll a session, or collect its exit result",
 		promptGuidelines: [
-			"Don't use chars and chars_b64 at the same time.",
-			'on_exit wake is set via exec_command or set_on_exit, not write_stdin. Observing an exit here consumes an armed wake (direct result). To disarm wake without killing, call set_on_exit(session_id, on_exit: "none").',
-			"In tty sessions, submit lines with \\r (the Enter key) rather than \\n: POSIX terminals accept both, but Windows console programs only execute input on \\r.",
-			"For very noisy jobs, rely on the log and final/truncated output instead of repeatedly polling.",
-			`For exec_command, write_stdin, kill_session, list_sessions: If the tool output contains a log number, you can read ${OUTPUT_LOG_PATH_TEMPLATE.replace("<log>", "<log number>")} under Pi's cwd for the full command output`,
-			"For exec_command & write_stdin: In codemode, use r.details for structured data such as exit_code and session_id. To display the result, call text(r.text) directly.",
+			"write_stdin: Don't use chars and chars_b64 at the same time.",
+			'write_stdin: on_exit wake is set via exec_command or set_on_exit, not write_stdin. Observing an exit here consumes an armed wake (direct result). To disarm wake without killing, call set_on_exit(session_id, on_exit: "none").',
+			"write_stdin: In tty sessions, submit lines with \\r (the Enter key) rather than \\n: POSIX terminals accept both, but Windows console programs only execute input on \\r.",
+			"exec_command & write_stdin: For very noisy jobs, rely on the log and final/truncated output instead of repeatedly polling.",
+			`exec_command, write_stdin, kill_session, list_sessions: If the tool output contains a log number, you can read ${OUTPUT_LOG_PATH_TEMPLATE.replace("<log>", "<log number>")} under Pi's cwd for the full command output`,
+			"exec_command & write_stdin: In codemode, use r.details for structured data such as exit_code and session_id. To display the result, call text(r.text) directly.",
 		],
 		outputSchema: writeStdinScriptResultSchema,
 		parameters: Type.Object({

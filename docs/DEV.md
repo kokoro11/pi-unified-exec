@@ -24,6 +24,10 @@ Try the working copy with `pi -e .` from the checkout. For repeated testing, use
 
 Set `PI_UNIFIED_EXEC_TEST_CLI` to another Pi `dist/cli.js` to requalify the real CLI and TUI without changing dependencies. Add an entry to [Changelog.md](../Changelog.md) with every change. Distribution uses the GitHub repository; a Git tag can pin a version for Pi installs.
 
+## Tool guidance
+
+Pi puts `promptGuidelines` entries in the shared Rules section without adding their tool names. Make the applicable tool explicit in the first rule, and prefer `tool_name:` at the start of every tool-specific entry so each rule remains clear on its own. For example: `write_stdin: Don't use chars and chars_b64 at the same time.` Rules shared by several tools should explicitly name the tools they cover.
+
 ## Code map
 
 | Concern | Start here |
