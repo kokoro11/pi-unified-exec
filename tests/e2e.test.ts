@@ -354,6 +354,35 @@ describe("unified-exec e2e", () => {
 		await h.emit("session_shutdown");
 	});
 
+	it("kill_session reports a frozen lifetime and trailing output for an already-exited session", async () => {
+		const h = makeHarness();
+		await h.emit("session_start");
+		try {
+			const launchedAt = performance.now();
+			const started = await h.call("exec_command", {
+				cmd: "sleep 0.6; echo finished-before-kill",
+				yield_time_ms: 250,
+			});
+			const sid = started.details.session_id;
+			assert.equal(typeof sid, "number", JSON.stringify(started.details));
+			await new Promise((resolve) => setTimeout(resolve, 900));
+			const secondsBeforeKill = (performance.now() - launchedAt) / 1000;
+			const killed = await h.call("kill_session", { session_id: sid });
+			const total = killed.details.total_time_seconds;
+			assert.equal(killed.details.status, "killed");
+			assert.equal(killed.details.exit_code, 0);
+			assert.ok(total >= 0.55 && total < secondsBeforeKill - 0.1, JSON.stringify(killed.details));
+			assert.match(killed.details.output, /finished-before-kill/);
+			assert.equal(killed.structuredContent?.details.total_time_seconds, total);
+			assert.equal(killed.structuredContent?.details.pid, killed.details.pid);
+			assert.equal(killed.structuredContent?.text, killed.content[0].text);
+			assert.ok(killed.content[0].text.startsWith(`[killed #${sid}]\n`));
+			assert.doesNotMatch(killed.content[0].text, /^(?:session_id|pid|running|escalated):/m);
+		} finally {
+			await h.emit("session_shutdown");
+		}
+	});
+
 	it.skipIf(!IS_WINDOWS)("Windows: kill_session terminates a shell AND-list and releases inherited pipes", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
@@ -367,10 +396,9 @@ describe("unified-exec e2e", () => {
 
 			const killed = await h.call("kill_session", { session_id: sid });
 			assert.equal(killed.details.status, "killed", JSON.stringify(killed.details));
-			assert.equal(killed.details.killed, true);
 			assert.equal(killed.details.running, false);
-			assert.equal(killed.structuredContent?.status, "killed");
-			assert.equal(killed.structuredContent?.running, false);
+			assert.equal(killed.structuredContent?.details.status, "killed");
+			assert.equal(killed.structuredContent?.details.running, false);
 			const listed = await h.call("list_sessions", {});
 			assert.ok(!listed.details.sessions.some((s: any) => s.session_id === sid));
 		} finally {
@@ -464,14 +492,13 @@ describe("unified-exec e2e", () => {
 			assert.equal(killed.details.operation, "kill_session");
 			assert.equal(killed.details.status, "killed");
 			assert.equal(killed.details.running, false);
-			assert.equal(killed.details.killed, true);
 			assert.equal(Object.hasOwn(killed.details, "final_output"), false);
 			assert.ok(Buffer.byteLength(killed.details.output, "utf8") <= DEFAULT_MAX_BYTES);
 			assert.equal(killed.details.truncation?.truncated, true, JSON.stringify(killed.details.truncation));
-			assert.match(killed.content[0].text, /^\[killed\]/);
+			assert.ok(killed.content[0].text.startsWith(`[killed #${sid}]\n`));
 			assert.match(killed.content[0].text, /Showing lines/);
 			assert.equal(killed.details.log, log);
-			assert.equal(killed.structuredContent?.log, log);
+			assert.equal(killed.structuredContent?.details.log, log);
 			assert.ok(killed.content[0].text.includes(`Full output: ${log}]`));
 			assert.ok(
 				Buffer.byteLength(killed.content[0].text, "utf8") < DEFAULT_MAX_BYTES + 4096,

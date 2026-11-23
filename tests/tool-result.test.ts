@@ -59,6 +59,7 @@ describe("bounded tool results", () => {
 		const raw = Array.from({ length: DEFAULT_MAX_LINES + 1000 }, (_, index) => `line-${index + 1}`).join("\n");
 		const details = finalizeKillResult({
 			wallTimeSec: 0.5,
+			totalTimeSec: 1.5,
 			collected: encoder.encode(raw),
 			sessionId: 42,
 			pid: 1234,
@@ -77,14 +78,16 @@ describe("bounded tool results", () => {
 		assert.equal(details.operation, "kill_session");
 		assert.equal(details.status, "killed");
 		assert.equal(details.running, false);
-		assert.equal(details.killed, true);
+		assert.equal(details.total_time_seconds, 1.5);
 		assert.ok(Buffer.byteLength(details.output, "utf8") <= DEFAULT_MAX_BYTES);
 		assert.equal(details.truncation?.truncated, true);
 		assert.equal(details.truncation?.outputLines, DEFAULT_MAX_LINES);
 		assert.equal(Object.hasOwn(details, "final_output"), false);
 
 		const text = renderKillResultText(details);
-		assert.match(text, /^\[killed\]/);
+		assert.match(text, /^\[killed #42\]\n/);
+		assert.match(text, /^total_time: 1\.5s$/m);
+		assert.doesNotMatch(text, /^(?:session_id|pid|running|escalated):/m);
 		assert.match(text, /Showing lines/);
 		assert.match(text, /Full output: 42\]/);
 		assert.ok(Buffer.byteLength(text, "utf8") < DEFAULT_MAX_BYTES + 4096, `text bytes=${Buffer.byteLength(text)}`);
@@ -133,6 +136,7 @@ describe("bounded tool results", () => {
 	it("represents a failed kill as a live, retained session", () => {
 		const details = finalizeKillResult({
 			wallTimeSec: 0,
+			totalTimeSec: 15.25,
 			collected: encoder.encode("last diagnostic\n"),
 			sessionId: 9,
 			pid: 999,
@@ -148,10 +152,12 @@ describe("bounded tool results", () => {
 
 		assert.equal(details.status, "kill_failed");
 		assert.equal(details.running, true);
-		assert.equal(details.killed, false);
 		const text = renderKillResultText(details);
-		assert.match(text, /^\[kill failed\]/);
-		assert.match(text, /running: true/);
+		assert.match(text, /^\[kill failed #9\]\n/);
+		assert.match(text, /^pid: 999$/m);
+		assert.match(text, /^escalated: true$/m);
+		assert.match(text, /^total_time: 15\.25s$/m);
+		assert.doesNotMatch(text, /^(?:running|session_id):/m);
 		assert.doesNotMatch(text, /^wall_time:/m);
 		assert.match(text, /session remains registered/);
 	});

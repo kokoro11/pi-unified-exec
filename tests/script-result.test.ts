@@ -21,7 +21,12 @@ import {
 	setOnExitScriptResultSchema,
 } from "../src/script-result.ts";
 import { IS_WINDOWS } from "../src/shell.ts";
-import { finalizeKillResult, finalizeProcessResult, renderProcessResultText } from "../src/tool-result.ts";
+import {
+	finalizeKillResult,
+	finalizeProcessResult,
+	renderKillResultText,
+	renderProcessResultText,
+} from "../src/tool-result.ts";
 import { activateProcessTools } from "./fixtures/process-tools.ts";
 
 const encoder = new TextEncoder();
@@ -123,6 +128,7 @@ describe("script result projections", () => {
 	it("kill results, including failed and unknown sessions, match the kill schema", () => {
 		const killInput = {
 			wallTimeSec: 0.1,
+			totalTimeSec: 2.5,
 			collected: encoder.encode("bye\n"),
 			sessionId: 4,
 			pid: 1234,
@@ -134,19 +140,34 @@ describe("script result projections", () => {
 			escalated: false,
 			killed: true,
 		};
-		const killed = killScriptResult(finalizeKillResult(killInput));
+		const shape = finalizeKillResult(killInput);
+		const killed = killScriptResult(shape);
 		assert.ok(Value.Check(killScriptResultSchema, killed));
-		assert.equal(killed.status, "killed");
-		assert.equal(killed.output, "bye\n");
+		assertPlainJson(killed);
+		assert.equal(killed.details.status, "killed");
+		assert.equal(killed.details.output, "bye\n");
+		assert.equal(killed.details.pid, 1234);
+		assert.equal(killed.details.total_time_seconds, 2.5);
+		assert.equal(Object.hasOwn(killed.details, "killed"), false);
+		assert.equal(killed.text, renderKillResultText(shape));
+		assert.doesNotMatch(killed.text, /^pid:/m);
 
 		const failed = killScriptResult(finalizeKillResult({ ...killInput, killed: false, failure: "still alive" }));
 		assert.ok(Value.Check(killScriptResultSchema, failed));
-		assert.equal(failed.status, "kill_failed");
-		assert.equal(failed.running, true);
+		assert.equal(failed.details.status, "kill_failed");
+		assert.equal(failed.details.running, true);
+		assert.equal(failed.details.pid, 1234);
+		assert.equal(failed.details.total_time_seconds, 2.5);
+		assert.match(failed.text, /^pid: 1234$/m);
 
 		const missing = killNotFoundScriptResult(99);
 		assert.ok(Value.Check(killScriptResultSchema, missing));
-		assert.equal(missing.found, false);
+		assertPlainJson(missing);
+		assert.equal(missing.details.found, false);
+		assert.equal(Object.hasOwn(missing.details, "total_time_seconds"), false);
+		assert.equal(Object.hasOwn(missing.details, "pid"), false);
+		assert.equal(Object.hasOwn(missing.details, "killed"), false);
+		assert.equal(missing.text, "[kill failed #99]\nfailure: No such session: 99");
 	});
 });
 
@@ -211,10 +232,14 @@ describe("registered tools return structuredContent", () => {
 
 		const killed = await call("kill_session", { session_id: sid });
 		assert.ok(Value.Check(killScriptResultSchema, killed.structuredContent));
-		assert.equal(killed.structuredContent.status, "killed");
+		assert.equal(killed.structuredContent.details.status, "killed");
+		assert.equal(killed.structuredContent.details.pid, listed.structuredContent.sessions[0].pid);
+		assert.ok(killed.structuredContent.details.total_time_seconds >= polled.structuredContent.details.total_time_seconds);
+		assert.equal(killed.structuredContent.text, killed.content[0].text);
 		const unknownKill = await call("kill_session", { session_id: sid });
 		assert.ok(Value.Check(killScriptResultSchema, unknownKill.structuredContent));
-		assert.equal(unknownKill.structuredContent.found, false);
+		assert.equal(unknownKill.structuredContent.details.found, false);
+		assert.equal(unknownKill.structuredContent.text, unknownKill.content[0].text);
 	});
 });
 

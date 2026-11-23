@@ -54,6 +54,7 @@ describe("unified-exec renderers", () => {
 		const output = Array.from({ length: 20 }, (_, index) => `line-${index + 1}`).join("\n");
 		const details = finalizeKillResult({
 			wallTimeSec: 0.1,
+			totalTimeSec: 1.5,
 			collected: encoder.encode(output),
 			sessionId: 73,
 			pid: 777,
@@ -79,7 +80,9 @@ describe("unified-exec renderers", () => {
 		assert.doesNotMatch(collapsedText, /\nline-1\n/);
 		assert.match(collapsedText, /earlier lines/);
 		assert.match(collapsedText.toLowerCase(), /to expand/);
-		assert.match(collapsedText, /killed session_id=73/);
+		assert.match(collapsedText, /\[killed #73\]/);
+		assert.match(collapsedText, /total 1\.5s/);
+		assert.doesNotMatch(collapsedText, /pid=777/);
 		assert.match(collapsedText, / · log=73$/m);
 
 		const expanded = renderKillSessionResult(
@@ -117,7 +120,6 @@ describe("unified-exec renderers", () => {
 			found: true,
 			session_id: 4,
 			requested_signal: "SIGTERM",
-			killed: true,
 			escalated: false,
 			wall_time_seconds: 0.1,
 			output: `before${osc}after`,
@@ -185,16 +187,17 @@ describe("unified-exec renderers", () => {
 	});
 
 	it("kill_session unknown-id results are compact errors", () => {
+		const text = "[kill failed #999]\nfailure: No such session: 999";
 		const component = renderKillSessionResult(
 			{
-				content: [{ type: "text", text: "No such session: 999" }],
+				content: [{ type: "text", text }],
 				details: { operation: "kill_session", status: "kill_failed", running: false, found: false },
 			} as any,
 			{ expanded: false, isPartial: false },
 			plainTheme,
 			context({}),
 		);
-		assert.equal(rendered(component, 80).trim(), "No such session: 999");
+		assert.equal(rendered(component, 80).trim(), text);
 	});
 
 	it("list_sessions previews five entries, caches rows, and expands all entries with log numbers", () => {

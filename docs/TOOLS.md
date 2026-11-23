@@ -46,6 +46,8 @@ In `chars`, use `\n` for a pipe's newline, `\r` for Enter in a terminal (includi
 | `kill_session` | `session_id`, optional `signal` (default `SIGTERM`) | Suppress a pending wake and stop the child. On POSIX, escalate to `SIGKILL` after two seconds as needed. On Windows, force-terminate the session's Job Object, including descendants whose parents have exited. An unconfirmed kill leaves the session registered. |
 | `list_sessions` | None | Include `session_id`, `running`, `wake_armed`, and `log` when available. Report each unobserved exit once, then remove it from the list. |
 
+`kill_session` reports `[killed #N]` or `[kill failed #N]`. For a known session, `total_time` covers its lifetime from launch and stops at exit; `wall_time` measures the kill call. The text shows a PID only while the session remains running, and reports `escalated` only when true. A missing session reports `[kill failed #N]` with a failure message and omits its unknown lifetime.
+
 A wake sends a follow-up with exit metadata and a log number when available. Any successful tool result that observes the completion consumes the pending wake. A deadline, steer, or cancellation keeps it armed. Use `set_on_exit` with `"none"` when you no longer want a wake; a follow-up already queued to Pi stays queued.
 
 ## Output and logs
@@ -56,14 +58,16 @@ At 512 cumulative raw bytes, the extension starts archiving the full stream, inc
 
 ## Codemode
 
-`exec_command` and `write_stdin` return `{ details, text }` inside Codemode. `exec_command` includes `details.session_id` when the command is still running. `write_stdin` always includes `details.session_id` and `details.total_time_seconds`, even when it reports an exit. The total stops at exit. `details.output` is the bounded text; `text(r.text)` prints the formatted reply with line breaks.
+`exec_command`, `write_stdin`, and `kill_session` return `{ details, text }` inside Codemode. `exec_command` includes `details.session_id` when the command is still running. `write_stdin` always includes `details.session_id` and `details.total_time_seconds`, even when it reports an exit. The total stops at exit. `details.output` is the bounded text; `text(r.text)` prints the formatted reply with line breaks.
 
 ```js
 const r = await tools.exec_command({ cmd: "git status --short" });
 text(r.text);
 ```
 
-`kill_session`, `list_sessions`, and `set_on_exit` return typed fields directly. See the [result schemas](../src/script-result.ts). The extension caps collapsed Codemode text at ten visual rows across nested tools without enabling Codemode or changing script results or expanded output.
+For `kill_session`, use `details.status` for the outcome, `details.found` to identify a missing session, and `details.running` to check whether it remains registered and running. `details.pid` preserves a known PID, including after exit; `details.total_time_seconds` reports the session lifetime and is omitted when the session is missing. The result has no `killed` field.
+
+`list_sessions` and `set_on_exit` return typed fields directly. See the [result schemas](../src/script-result.ts). The extension caps collapsed Codemode text at ten visual rows across nested tools without enabling Codemode or changing script results or expanded output.
 
 ## Configuration
 

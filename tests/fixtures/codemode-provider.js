@@ -18,8 +18,8 @@ const scripts = {
 	],
 	mcp: ['const r = await tools.mcp__fixture__echo({}); text(r);'],
 	kill: [
-		'const started = await tools.exec_command({cmd:"sleep 120 && echo tail", yield_time_ms:300}); store("started", started.details); const killed = await tools.kill_session({session_id:started.details.session_id}); store("killed", killed); text(killed);',
-		'const listed = await tools.list_sessions({}); store("listed", listed); const missing = await tools.kill_session({session_id:load("started").session_id}); store("missing", missing); text(listed); text(missing);',
+		'const started = await tools.exec_command({cmd:"sleep 120 && echo tail", yield_time_ms:300}); store("started", started.details); const killed = await tools.kill_session({session_id:started.details.session_id}); store("killed", killed); text(killed.text);',
+		'const listed = await tools.list_sessions({}); store("listed", listed); const missing = await tools.kill_session({session_id:load("started").session_id}); store("missing", missing); text(listed); text(missing.text);',
 	],
 	inactive: [],
 };

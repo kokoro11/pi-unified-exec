@@ -84,20 +84,27 @@ test("codemode CLI replacement remains inactive without normal activation", () =
 	assert.ok(!fixed.requests[0].tools.some((t: any) => t.name === "codemode"));
 });
 
-test.skipIf(process.platform !== "win32")("codemode CLI kills a Windows shell AND-list and removes its session", () => {
+test("codemode CLI returns kill details and formatted text and removes the session", () => {
 	const result = run({ pattern: "kill" });
 	const saved = new Map<string, any>();
 	for (const change of stores(result.events)) {
 		for (const [key, value] of Object.entries(change.set ?? {})) saved.set(key, value);
 	}
 	assert.equal(typeof saved.get("started").session_id, "number");
-	assert.equal(saved.get("killed").status, "killed");
-	assert.equal(saved.get("killed").killed, true);
-	assert.equal(saved.get("killed").running, false);
+	const killed = saved.get("killed");
+	assert.equal(killed.details.status, "killed");
+	assert.equal(killed.details.running, false);
+	assert.ok(killed.details.pid > 0);
+	assert.ok(killed.details.total_time_seconds >= 0.25);
+	assert.equal(Object.hasOwn(killed.details, "killed"), false);
+	assert.ok(killed.text.startsWith(`[killed #${saved.get("started").session_id}]\n`));
+	assert.doesNotMatch(killed.text, /^(?:pid|running|session_id|escalated):/m);
 	assert.equal(saved.get("listed").active_count, 0);
 	assert.equal(saved.get("listed").sessions.length, 0);
-	assert.equal(saved.get("missing").found, false);
-	assert.equal(saved.get("missing").running, false);
+	assert.equal(saved.get("missing").details.found, false);
+	assert.equal(saved.get("missing").details.running, false);
+	assert.equal(Object.hasOwn(saved.get("missing").details, "total_time_seconds"), false);
+	assert.ok(saved.get("missing").text.startsWith(`[kill failed #${saved.get("started").session_id}]\n`));
 });
 
 test("codemode CLI MCP auto-activates the schema-identical replacement", () => {

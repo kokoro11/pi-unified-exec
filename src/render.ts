@@ -55,9 +55,7 @@ interface DetailsShape extends Partial<OutputResultDetails> {
 	found?: boolean;
 	pid?: number;
 	requested_signal?: string;
-	killed?: boolean;
 	escalated?: boolean;
-	total_time_seconds?: number;
 	yield_time_ms?: number;
 	wait_status?: string;
 	completion_notification?: string;
@@ -369,11 +367,11 @@ function buildStatusLine(
 
 	if (details.operation === "kill_session") {
 		bits.push(
-			details.killed
-				? theme.fg("success", `killed session_id=${details.session_id ?? "?"}`)
-				: theme.fg("error", `FAILED session_id=${details.session_id ?? "?"} · still running`),
+			details.status === "killed"
+				? theme.fg("success", `[killed #${details.session_id ?? "?"}]`)
+				: theme.fg("error", `[kill failed #${details.session_id ?? "?"}]`),
 		);
-		if (details.pid !== undefined) bits.push(`pid=${details.pid}`);
+		if (details.running && details.pid !== undefined) bits.push(`pid=${details.pid}`);
 		if (details.requested_signal) bits.push(`requested=${safeOneLine(details.requested_signal)}`);
 		if (details.escalated) bits.push(theme.fg("warning", "escalated to SIGKILL"));
 		if (details.exit_code !== undefined) bits.push(`exit_code=${details.exit_code}`);

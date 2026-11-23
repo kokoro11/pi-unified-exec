@@ -176,7 +176,7 @@ describe("write_stdin attached waits", () => {
 		assert.equal(r2.details.running, true);
 		assert.equal(r2.details.output, "");
 		const killed = await h.call("kill_session", { session_id: r1.details.session_id });
-		assert.equal(killed.details.killed, true);
+		assert.equal(killed.details.status, "killed");
 		assert.match(killed.details.output, /cancel-marker/);
 	});
 

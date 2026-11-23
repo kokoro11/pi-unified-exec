@@ -75,7 +75,6 @@ export { MAX_EMPTY_POLL_ENV_VAR, resolveMaxEmptyPollMs } from "./time.ts";
 import {
 	finalizeKillResult,
 	finalizeProcessResult,
-	renderKillResultText,
 	type FinalizeProcessInput,
 	type ProcessResultDetails,
 	WAIT_CANCELLED,
@@ -1130,7 +1129,7 @@ export default function (pi: ExtensionAPI) {
 			"write_stdin: In tty sessions, submit lines with \\r (the Enter key) rather than \\n: POSIX terminals accept both, but Windows console programs only execute input on \\r.",
 			"exec_command & write_stdin: For very noisy jobs, rely on the log and final/truncated output instead of repeatedly polling.",
 			`exec_command, write_stdin, kill_session, list_sessions: If the tool output contains a log number, you can read ${OUTPUT_LOG_PATH_TEMPLATE.replace("<log>", "<log number>")} under Pi's cwd for the full command output`,
-			"exec_command & write_stdin: In codemode, use r.details for structured data such as exit_code and session_id. To display the result, call text(r.text) directly.",
+			"exec_command, write_stdin & kill_session: In codemode, results are { details, text }. Use r.details for structured data such as status and session_id, or call text(r.text) to display the formatted reply.",
 		],
 		outputSchema: writeStdinScriptResultSchema,
 		parameters: Type.Object({
@@ -1246,7 +1245,7 @@ export default function (pi: ExtensionAPI) {
 		name: "kill_session",
 		label: "kill_session",
 		description:
-			"Terminate a session (SIGTERM, escalates to SIGKILL after 2s; on Windows any signal force-kills the process tree). A successful kill invalidates the session_id and suppresses any armed wake. If termination fails, the session remains registered.",
+			"Terminate a session with SIGTERM, escalating to SIGKILL after 2s on POSIX; Windows force-kills all session processes for any signal. Returns `[killed #N]` or `[kill failed #N]`, with total_time for known sessions. A successful kill invalidates the session ID and suppresses its wake; an unconfirmed kill keeps the session registered.",
 		promptSnippet: "Terminate a session",
 		outputSchema: killScriptResultSchema,
 		parameters: Type.Object({
@@ -1262,8 +1261,9 @@ export default function (pi: ExtensionAPI) {
 			const startedAt = Date.now();
 			const outcome = await terminateSessionById(ctx, sid, initial);
 			if (!outcome) {
+				const structuredContent = killNotFoundScriptResult(sid);
 				return {
-					content: [{ type: "text", text: `No such session: ${sid}` }],
+					content: [{ type: "text", text: structuredContent.text }],
 					details: {
 						operation: "kill_session",
 						status: "kill_failed",
@@ -1271,7 +1271,7 @@ export default function (pi: ExtensionAPI) {
 						session_id: sid,
 						found: false,
 					} as const,
-					structuredContent: killNotFoundScriptResult(sid),
+					structuredContent,
 				};
 			}
 			const { session, escalated, collected, killed } = outcome;
@@ -1290,6 +1290,7 @@ export default function (pi: ExtensionAPI) {
 				collected: collected.bytes,
 				omittedBytes: collected.omittedBytes,
 				sessionId: sid,
+				totalTimeSec: session.totalTimeSeconds,
 				pid: session.pid,
 				requestedSignal: initial,
 				exitCode: session.exitCode,
@@ -1302,10 +1303,11 @@ export default function (pi: ExtensionAPI) {
 				escalated,
 				killed,
 			});
+			const structuredContent = killScriptResult(details);
 			return {
-				content: [{ type: "text", text: renderKillResultText(details) }],
+				content: [{ type: "text", text: structuredContent.text }],
 				details,
-				structuredContent: killScriptResult(details),
+				structuredContent,
 			};
 		},
 		renderCall: renderKillSessionCall,

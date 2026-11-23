@@ -30,6 +30,8 @@ export interface OutputResultDetails {
 	status: ProcessStatus | KillStatus;
 	running: boolean;
 	wall_time_seconds: number;
+	/** Session lifetime in seconds, frozen at exit when reported. */
+	total_time_seconds?: number;
 	/** Bounded, terminal-inert tail sent to the model and used by the TUI renderer. */
 	output: string;
 	session_id?: number;
@@ -50,8 +52,6 @@ export interface OutputResultDetails {
 export interface ProcessResultDetails extends OutputResultDetails {
 	operation: ProcessOperation;
 	status: ProcessStatus;
-	/** Lifetime of the session in seconds, reported by write_stdin. */
-	total_time_seconds?: number;
 	yield_time_ms?: number;
 	/** Plain-language guidance present only when a wait is cancelled or steered. */
 	wait_status?: string;
@@ -67,9 +67,9 @@ export interface KillResultDetails extends OutputResultDetails {
 	status: KillStatus;
 	found: true;
 	session_id: number;
+	total_time_seconds: number;
 	pid?: number;
 	requested_signal: string;
-	killed: boolean;
 	escalated: boolean;
 }
 
@@ -98,6 +98,7 @@ export interface FinalizeProcessInput extends OutputEnvelopeInput {
 
 export interface FinalizeKillInput extends OutputEnvelopeInput {
 	sessionId: number;
+	totalTimeSec: number;
 	pid?: number;
 	requestedSignal: NodeJS.Signals;
 	exitCode: number | null | undefined;
@@ -175,8 +176,8 @@ export function finalizeKillResult(input: FinalizeKillInput): KillResultDetails 
 		running: !input.killed,
 		found: true,
 		session_id: input.sessionId,
+		total_time_seconds: input.totalTimeSec,
 		requested_signal: input.requestedSignal,
-		killed: input.killed,
 		escalated: input.escalated,
 		tty: input.tty,
 	};
@@ -237,16 +238,16 @@ export function renderProcessResultText(shape: ProcessResultDetails): string {
 }
 
 export function renderKillResultText(shape: KillResultDetails): string {
-	const lines: string[] = [shape.killed ? "[killed]" : "[kill failed]"];
-	lines.push(`session_id: ${shape.session_id}`);
-	if (shape.pid !== undefined) lines.push(`pid: ${shape.pid}`);
-	lines.push(`running: ${shape.running}`);
-	lines.push(`escalated: ${shape.escalated}`);
+	const outcome = shape.status === "killed" ? "killed" : "kill failed";
+	const lines = [`[${outcome} #${shape.session_id}]`];
+	if (shape.running && shape.pid !== undefined) lines.push(`pid: ${shape.pid}`);
+	if (shape.escalated) lines.push("escalated: true");
 	if (shape.exit_code !== undefined) lines.push(`exit_code: ${shape.exit_code}`);
 	if (shape.signal) lines.push(`signal: ${safeMeta(shape.signal)}`);
 	if (shape.failure_message) lines.push(`failure: ${safeMeta(shape.failure_message)}`);
 	if (shape.log && !shape.truncation?.truncated) lines.push(`log: ${shape.log}`);
 	appendWallTime(lines, shape.wall_time_seconds);
+	lines.push(`total_time: ${formatWallTime(shape.total_time_seconds)}`);
 	if (shape.omitted_bytes) lines.push(`omitted_bytes: ${shape.omitted_bytes}`);
 	return appendOutputSection(lines, shape);
 }

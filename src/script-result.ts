@@ -1,14 +1,20 @@
 /**
  * Script-facing results for Pi codemode.
  *
- * For exec_command and write_stdin, `text` is the formatted tool reply and
+ * For exec_command, write_stdin, and kill_session, `text` is the formatted tool reply and
  * `details` holds typed state and the bounded, sanitized output tail.
  */
 
 import { Type, type Static } from "typebox";
 
 import type { OnExitPolicy } from "./completion.ts";
-import { type KillResultDetails, type ProcessResultDetails, renderProcessResultText, safeMeta } from "./tool-result.ts";
+import {
+	type KillResultDetails,
+	type ProcessResultDetails,
+	renderKillResultText,
+	renderProcessResultText,
+	safeMeta,
+} from "./tool-result.ts";
 
 const optionalMeta = (value: string | undefined): string | undefined => (value ? safeMeta(value) : undefined);
 
@@ -98,46 +104,60 @@ export function writeStdinScriptResult(
 }
 
 export const killScriptResultSchema = Type.Object({
-	status: Type.Union([Type.Literal("killed"), Type.Literal("kill_failed")]),
-	found: Type.Boolean({ description: "False when no session had this id." }),
-	killed: Type.Boolean(),
-	running: Type.Boolean({ description: "True when the kill was not confirmed and the session remains registered." }),
-	escalated: Type.Boolean({ description: "True when SIGKILL escalation was needed." }),
-	session_id: Type.Number(),
-	...outputFields,
+	details: Type.Object({
+		status: Type.Union([Type.Literal("killed"), Type.Literal("kill_failed")]),
+		found: Type.Boolean({ description: "False when no session had this id." }),
+		running: Type.Boolean({ description: "True when the kill was not confirmed and the session remains registered." }),
+		escalated: Type.Boolean({ description: "True when SIGKILL escalation was needed." }),
+		session_id: Type.Number(),
+		pid: Type.Optional(Type.Number({ description: "Session process ID, when known. On Windows this is the launcher PID." })),
+		total_time_seconds: Type.Optional(Type.Number({
+			description: "Session lifetime in seconds, frozen at exit. Omitted when no session had this id.",
+		})),
+		...outputFields,
+	}),
+	text: Type.String({ description: "Formatted kill result with status, session ID, timing, and output." }),
 });
 export type KillScriptResult = Static<typeof killScriptResultSchema>;
 
 export function killScriptResult(shape: KillResultDetails): KillScriptResult {
-	return compact({
-		status: shape.status,
-		found: true,
-		killed: shape.killed,
-		running: shape.running,
-		escalated: shape.escalated,
-		session_id: shape.session_id,
-		output: shape.output,
-		truncated: shape.truncation?.truncated === true,
-		omitted_bytes: shape.omitted_bytes || undefined,
-		exit_code: shape.exit_code,
-		signal: optionalMeta(shape.signal),
-		failure_message: optionalMeta(shape.failure_message),
-		log: shape.log,
-		wall_time_seconds: shape.wall_time_seconds,
-	});
+	return {
+		details: compact({
+			status: shape.status,
+			found: true,
+			running: shape.running,
+			escalated: shape.escalated,
+			session_id: shape.session_id,
+			pid: shape.pid,
+			total_time_seconds: shape.total_time_seconds,
+			output: shape.output,
+			truncated: shape.truncation?.truncated === true,
+			omitted_bytes: shape.omitted_bytes || undefined,
+			exit_code: shape.exit_code,
+			signal: optionalMeta(shape.signal),
+			failure_message: optionalMeta(shape.failure_message),
+			log: shape.log,
+			wall_time_seconds: shape.wall_time_seconds,
+		}),
+		text: renderKillResultText(shape),
+	};
 }
 
 export function killNotFoundScriptResult(sessionId: number): KillScriptResult {
+	const failure = `No such session: ${sessionId}`;
 	return {
-		status: "kill_failed",
-		found: false,
-		killed: false,
-		running: false,
-		escalated: false,
-		session_id: sessionId,
-		output: "",
-		truncated: false,
-		wall_time_seconds: 0,
+		details: {
+			status: "kill_failed",
+			found: false,
+			running: false,
+			escalated: false,
+			session_id: sessionId,
+			output: "",
+			truncated: false,
+			wall_time_seconds: 0,
+			failure_message: failure,
+		},
+		text: `[kill failed #${sessionId}]\nfailure: ${failure}`,
 	};
 }
 
