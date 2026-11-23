@@ -1,4 +1,4 @@
-import { formatElapsedShort } from "./format-time.ts";
+import { formatElapsed } from "./format-time.ts";
 import { OUTPUT_LOG_PATH_TEMPLATE } from "./output-log.ts";
 
 /**
@@ -474,7 +474,7 @@ export function buildWakeMessage(snapshots: CompletionSnapshot[]): WakeMessage {
 					: "exit status unknown";
 		const failure = s.failureMessage ? ` | failure: ${oneLine(s.failureMessage, MAX_FAILURE_CHARS)}` : "";
 		lines.push(
-			`- session_id=${s.sessionId} | ${status} | elapsed ${formatElapsedShort(s.elapsedMs)} | ` +
+			`- session_id=${s.sessionId} | ${status} | elapsed ${formatElapsed(s.elapsedMs)} | ` +
 				`cwd: ${oneLine(s.cwd, 120)}${failure}`,
 		);
 		lines.push(`  command: ${oneLine(s.command, MAX_COMMAND_CHARS)}`);

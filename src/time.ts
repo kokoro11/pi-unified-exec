@@ -1,5 +1,7 @@
 /** Empty-poll duration policy. */
 
+import { formatElapsed } from "./format-time.ts";
+
 export const MIN_EMPTY_YIELD_TIME_MS = 5_000;
 export const MAX_EMPTY_POLL_ENV_VAR = "PI_UNIFIED_EXEC_MAX_EMPTY_POLL_MS";
 
@@ -23,7 +25,7 @@ export function resolveEmptyPollYield(ms: number | undefined, env: NodeJS.Proces
 	const cap = resolveMaxEmptyPollMs(env);
 	if (cap !== undefined && duration > cap) {
 		throw new Error(
-			`write_stdin: yield_time_ms ${duration} exceeds the configured empty-poll cap of ${cap} ms ` +
+			`write_stdin: yield_time_ms ${duration} exceeds the configured empty-poll cap of ${formatElapsed(cap)} ` +
 				`(${MAX_EMPTY_POLL_ENV_VAR}). Request a shorter wait.`,
 		);
 	}

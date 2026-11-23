@@ -100,9 +100,9 @@ function makeHarness() {
 }
 
 /** Poll until `cond` is true or the deadline passes (CI runners are slow). */
-async function waitFor(cond: () => boolean, timeoutMs = 8000): Promise<boolean> {
+async function waitFor(cond: () => boolean | Promise<boolean>, timeoutMs = 8000): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs;
-	while (!cond() && Date.now() < deadline) {
+	while (!(await cond()) && Date.now() < deadline) {
 		await new Promise((r) => setTimeout(r, 50));
 	}
 	return cond();
@@ -253,7 +253,7 @@ describe("unified-exec e2e", () => {
 			// Values above the lowered cap are rejected against that cap…
 			await assert.rejects(
 				() => h.call("write_stdin", { session_id: sid, chars: "", yield_time_ms: 20_000 }),
-				/exceeds the configured empty-poll cap of 10000 ms/,
+				/exceeds the configured empty-poll cap of 10s/,
 			);
 			// …while in-cap values behave normally.
 			const r2 = await h.call("write_stdin", {
@@ -901,12 +901,16 @@ describe("unified-exec e2e", () => {
 	it("list_sessions entries include log", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
-		const r1 = await h.call("exec_command", { cmd: 'printf "%0512d" 0; sleep 10', yield_time_ms: 200 });
+		const r1 = await h.call("exec_command", { cmd: 'sleep 0.4; printf "%0512d" 0; sleep 10', yield_time_ms: 200 });
+		assert.ok(await waitFor(async () => {
+			const listed = await h.call("list_sessions", {});
+			return typeof listed.details.sessions[0]?.log === "number";
+		}));
 		const l = await h.call("list_sessions", {});
 		assert.equal(l.details.active_count, 1);
 		const entry = l.details.sessions[0];
 		assert.equal(entry.session_id, r1.details.session_id);
-		assert.equal(entry.log, r1.details.log);
+		assert.equal(typeof entry.log, "number");
 		assert.equal(l.structuredContent?.sessions[0].log, entry.log);
 		assert.ok(existsSync(join(OUTPUT_LOG_DIRECTORY, `${entry.log}.log`)));
 		await h.call("kill_session", { session_id: r1.details.session_id });

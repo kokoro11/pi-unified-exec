@@ -1367,7 +1367,7 @@ export default function (pi: ExtensionAPI) {
 						const wake = s.wake_armed ? " [wake]" : "";
 						return `  ${String(s.session_id).padStart(3)}  pid=${String(s.pid ?? "?").padStart(6)}  ${
 							s.tty ? "tty" : "pipe"
-						}  ${((s.elapsed_ms / 1000).toFixed(1) + "s").padStart(8)}${wake}  ${oneLineCommand(s.command, 60)}${exitedSuffix}${s.log ? `\n        log: ${s.log}` : ""}`;
+						}  ${formatElapsed(s.elapsed_ms).padStart(8)}${wake}  ${oneLineCommand(s.command, 60)}${exitedSuffix}${s.log ? `\n        log: ${s.log}` : ""}`;
 					})
 				: ["  (no live sessions)"];
 			const header = reaped.length

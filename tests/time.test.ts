@@ -2,11 +2,11 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "bun:test";
-import { formatWallTime } from "../src/format-time.ts";
+import { formatElapsed, formatWallTime } from "../src/format-time.ts";
 import { MAX_EMPTY_POLL_ENV_VAR, resolveEmptyPollYield, resolveMaxEmptyPollMs } from "../src/time.ts";
 
-describe("formatWallTime", () => {
-	it("uses milliseconds, four significant digits, and whole seconds at the requested boundaries", () => {
+describe("duration formatting", () => {
+	it("formats second and millisecond inputs with the same precision", () => {
 		for (const [seconds, expected] of [
 			[0, "0ms"],
 			[0.012, "12ms"],
@@ -24,7 +24,9 @@ describe("formatWallTime", () => {
 			[12345.6, "12346s"],
 		] as const) {
 			assert.equal(formatWallTime(seconds), expected);
+			assert.equal(formatElapsed(seconds * 1000), expected);
 		}
+		assert.equal(formatElapsed(-1), "0ms");
 	});
 });
 
@@ -51,7 +53,7 @@ describe("empty relative poll policy", () => {
 		assert.equal(resolveMaxEmptyPollMs({ [MAX_EMPTY_POLL_ENV_VAR]: "1000" }), 5000);
 		const env = { [MAX_EMPTY_POLL_ENV_VAR]: "900000" };
 		assert.equal(resolveEmptyPollYield(900_000, env), 900_000);
-		assert.throws(() => resolveEmptyPollYield(900_001, env), /configured empty-poll cap.*Request a shorter wait\.$/);
+		assert.throws(() => resolveEmptyPollYield(900_001, env), /configured empty-poll cap of 900s.*Request a shorter wait\.$/);
 		for (const raw of ["0", "-1", "NaN", "Infinity", "oops", "9007199254740992"]) {
 			assert.throws(() => resolveMaxEmptyPollMs({ [MAX_EMPTY_POLL_ENV_VAR]: raw }), /positive finite/);
 		}

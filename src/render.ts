@@ -23,7 +23,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Container, Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
 
-import { formatDurationSeconds, formatWallTime } from "./format-time.ts";
+import { formatElapsed, formatWallTime } from "./format-time.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
 import { type KillResultDetails, type OutputResultDetails, type ProcessResultDetails, WAIT_CANCELLED, WAIT_STEERED } from "./tool-result.ts";
 
@@ -124,7 +124,7 @@ export function renderExecCommandCall(
 	// Match Pi's built-in bash renderer: preserve multiline commands verbatim.
 	const cmd = sanitizeOutputText(args?.cmd || "...");
 	const parts: string[] = [];
-	if (args?.yield_time_ms) parts.push(`yield ${(args.yield_time_ms / 1000).toFixed(1)}s`);
+	if (args?.yield_time_ms) parts.push(`yield ${formatElapsed(args.yield_time_ms)}`);
 	const effectiveCwd = args?.workdir || context.cwd;
 	if (effectiveCwd) parts.push(`cwd: ${safeOneLine(tildify(effectiveCwd))}`);
 	if (args?.tty) parts.push("tty");
@@ -155,7 +155,7 @@ export function renderWriteStdinCall(
 			? theme.fg("toolTitle", theme.bold(`» ${stringifyChars(chars)}`))
 			: theme.fg("toolTitle", theme.bold(`» (base64, ${base64ByteLength(b64)} bytes)`));
 	const yieldSuffix = args?.yield_time_ms
-		? theme.fg("muted", ` (yield ${(args.yield_time_ms / 1000).toFixed(1)}s)`)
+		? theme.fg("muted", ` (yield ${formatElapsed(args.yield_time_ms)})`)
 		: "";
 	const banner = `${op} ${theme.fg("muted", `→ session_id=${sid}`)}${yieldSuffix}`;
 
@@ -359,7 +359,7 @@ function buildStatusLine(
 
 	if (state.startedAt !== undefined) {
 		const now = state.endedAt ?? Date.now();
-		const duration = formatDurationSeconds(now - state.startedAt);
+		const duration = formatElapsed(now - state.startedAt);
 		const label = options.isPartial ? "elapsed" : details.running ? "yielded" : "took";
 		bits.push(theme.fg("muted", `${label} ${duration}`));
 	}
@@ -462,7 +462,7 @@ export function renderListSessionsResult(
 							);
 					const wake = session.wake_armed ? theme.fg("warning", " [wake]") : "";
 					const command = safeOneLine(session.command, 100);
-					const line = `#${session.session_id} pid=${session.pid ?? "?"} ${session.tty ? "tty" : "pipe"} ${(session.elapsed_ms / 1000).toFixed(1)}s ${state}${wake} ${command}`;
+					const line = `#${session.session_id} pid=${session.pid ?? "?"} ${session.tty ? "tty" : "pipe"} ${formatElapsed(session.elapsed_ms)} ${state}${wake} ${command}`;
 					lines.push(truncateToWidth(line, width, "..."));
 					if (options.expanded && typeof session.log === "number") {
 						lines.push(

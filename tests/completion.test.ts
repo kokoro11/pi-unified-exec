@@ -372,7 +372,7 @@ describe("buildWakeMessage", () => {
 			command: `job ${i + 1}`,
 			cwd: "/tmp",
 			startedAtMs: 0,
-			elapsedMs: 1000,
+			elapsedMs: 1234.56,
 			exitCode: 0,
 			signal: null,
 			failureMessage: null,
@@ -381,7 +381,9 @@ describe("buildWakeMessage", () => {
 		const msg = buildWakeMessage(snapshots);
 		assert.match(msg.content, /40 background sessions exited/);
 		assert.match(msg.content, /and 24 more/);
+		assert.match(msg.content, /elapsed 1\.235s/);
 		assert.ok(msg.details.sessions.length <= 16);
+		assert.equal(msg.details.sessions[0]!.elapsedMs, 1234.56);
 	});
 });
 

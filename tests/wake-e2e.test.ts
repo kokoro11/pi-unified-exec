@@ -158,7 +158,7 @@ describe("write_stdin attached waits", () => {
 		const h = makeHarness();
 		await h.emit("session_start");
 		const r1 = await h.call("exec_command", {
-			cmd: 'printf "%0512d\\n" 0; sleep 0.6; echo cancel-marker; sleep 30',
+			cmd: 'sleep 0.4; printf "%0512d\\n" 0; sleep 0.6; echo cancel-marker; sleep 30',
 			yield_time_ms: 250,
 		});
 		const ac = new AbortController();
@@ -166,7 +166,13 @@ describe("write_stdin attached waits", () => {
 			session_id: r1.details.session_id, yield_time_ms: Number.MAX_SAFE_INTEGER,
 		}, ac.signal);
 		try {
-			assert.ok(await waitFor(() => readFileSync(join(OUTPUT_LOG_DIRECTORY, `${r1.details.log}.log`), "utf8").includes("cancel-marker")));
+			assert.ok(await waitFor(async () => {
+				// Output can begin after the first yield; listing metadata leaves the wait's buffer intact.
+				const listed = await h.call("list_sessions", {});
+				const log = listed.details.sessions.find((s: any) => s.session_id === r1.details.session_id)?.log;
+				return typeof log === "number" &&
+					readFileSync(join(OUTPUT_LOG_DIRECTORY, `${log}.log`), "utf8").includes("cancel-marker");
+			}));
 		} finally {
 			ac.abort();
 		}

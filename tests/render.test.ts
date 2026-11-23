@@ -171,7 +171,7 @@ describe("unified-exec renderers", () => {
 				result,
 				{ expanded: false, isPartial: false },
 				colorTheme,
-				context({ startedAt: Date.now() - 800 }),
+				context({ startedAt: 0, endedAt: 800 }),
 			);
 			const line = rendered(component, 200).split("\n").find((line) => line.includes("log=241"))!;
 			const plain = stripTerminalSequences(line);
@@ -184,7 +184,9 @@ describe("unified-exec renderers", () => {
 					`${color} at column ${column}: ${JSON.stringify(cell)}`,
 				);
 			};
-			assertColor(scenario.details.running ? "yielded" : "took", "muted");
+			const durationLabel = scenario.details.running ? "yielded" : "took";
+			assert.ok(plain.startsWith(`${durationLabel} 800ms`), plain);
+			assertColor(durationLabel, "muted");
 			assertColor(scenario.highlight, scenario.color as ThemeColor);
 			assertColor(" · log=241", "muted");
 			assertColor("log=241", "muted");
@@ -291,7 +293,7 @@ describe("unified-exec renderers", () => {
 			cwd: "/repo",
 			tty: false,
 			pid: 1000 + index,
-			elapsed_ms: 1000 * (index + 1),
+			elapsed_ms: 1234.56 * (index + 1),
 			running: true,
 			wake_armed: index === 0,
 			log: index + 1,
@@ -311,6 +313,7 @@ describe("unified-exec renderers", () => {
 		const collapsed = renderListSessionsResult(result, { expanded: false, isPartial: false }, plainTheme, context({}));
 		const collapsedText = rendered(collapsed);
 		assert.match(collapsedText, /#1 /);
+		assert.match(collapsedText, /#1 pid=1000 pipe 1\.235s/);
 		assert.match(collapsedText, /#5 /);
 		assert.doesNotMatch(collapsedText, /#6 /);
 		assert.match(collapsedText, /2 more sessions/);

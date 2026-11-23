@@ -4,6 +4,8 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Use tool-reply duration formatting throughout previews, wait labels, session lists, widgets, pickers, wake messages, and displayed wait limits. Keep structured numeric timing fields unchanged.
+- Wait for log metadata in archive integration tests so slow command startup does not cause missing-log failures.
 - Show session lifetime in kill previews and preserve muted footer fields and separators after highlighted statuses across command, input, and kill previews.
 - Restore the kill-session preview footer's status labels and PID display, and keep session lifetime in tool replies and Codemode results.
 - Wrap Codemode `kill_session` results in `{ details, text }`, remove the redundant `killed` field, and include the known PID and session lifetime. Put the session ID in kill reply headers, add `total_time`, hide stopped PIDs and false escalation flags, and use the same formatted reply in direct calls and Codemode.
