@@ -6,7 +6,7 @@ import {
 	type TruncationResult,
 } from "@earendil-works/pi-coding-agent";
 
-import type { OnExitPolicy } from "./completion.ts";
+import type { OnExitStatus } from "./completion.ts";
 import { formatWallTime } from "./format-time.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
 
@@ -40,6 +40,7 @@ export interface OutputResultDetails {
 	failure_message?: string;
 	tty?: boolean;
 	log?: number;
+	on_exit?: OnExitStatus;
 	cwd?: string;
 	command?: string;
 	truncation?: TruncationResult;
@@ -56,10 +57,7 @@ export interface ProcessResultDetails extends OutputResultDetails {
 	/** Plain-language guidance present only when a wait is cancelled or steered. */
 	wait_status?: string;
 	effective_wait_ms?: number;
-	on_exit?: OnExitPolicy;
-	completion_notification?: "armed";
 	completion_delivery?: "direct";
-	on_exit_wake?: "consumed";
 }
 
 export interface KillResultDetails extends OutputResultDetails {
@@ -109,6 +107,7 @@ export interface FinalizeKillInput extends OutputEnvelopeInput {
 	command?: string;
 	escalated: boolean;
 	killed: boolean;
+	onExit?: OnExitStatus;
 }
 
 function decode(bytes: Uint8Array): string {
@@ -182,6 +181,7 @@ export function finalizeKillResult(input: FinalizeKillInput): KillResultDetails 
 		tty: input.tty,
 	};
 	if (input.pid !== undefined) shape.pid = input.pid;
+	if (input.onExit) shape.on_exit = input.onExit;
 	if (input.exitCode !== undefined && input.exitCode !== null) shape.exit_code = input.exitCode;
 	if (input.signal) shape.signal = input.signal;
 	if (input.failure) shape.failure_message = input.failure;
@@ -228,8 +228,7 @@ export function renderProcessResultText(shape: ProcessResultDetails): string {
 	if (shape.wait_status === WAIT_CANCELLED || shape.wait_status === WAIT_STEERED) {
 		lines.push(`wait_status: ${shape.wait_status}`);
 	}
-	if (shape.on_exit) lines.push(`on_exit: ${safeMeta(shape.on_exit)}`);
-	if (shape.completion_notification) lines.push(`completion_notification: ${safeMeta(shape.completion_notification)}`);
+	if (shape.on_exit) lines.push(`on_exit: ${shape.on_exit}`);
 	if (shape.log && !shape.truncation?.truncated) lines.push(`log: ${shape.log}`);
 	appendWallTime(lines, shape.wall_time_seconds);
 	if (shape.total_time_seconds !== undefined) lines.push(`total_time: ${formatWallTime(shape.total_time_seconds)}`);
@@ -245,6 +244,7 @@ export function renderKillResultText(shape: KillResultDetails): string {
 	if (shape.exit_code !== undefined) lines.push(`exit_code: ${shape.exit_code}`);
 	if (shape.signal) lines.push(`signal: ${safeMeta(shape.signal)}`);
 	if (shape.failure_message) lines.push(`failure: ${safeMeta(shape.failure_message)}`);
+	if (shape.on_exit) lines.push(`on_exit: ${shape.on_exit}`);
 	if (shape.log && !shape.truncation?.truncated) lines.push(`log: ${shape.log}`);
 	appendWallTime(lines, shape.wall_time_seconds);
 	lines.push(`total_time: ${formatWallTime(shape.total_time_seconds)}`);

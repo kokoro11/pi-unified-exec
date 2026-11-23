@@ -23,6 +23,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Container, Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
 
+import type { OnExitStatus } from "./completion.ts";
 import { formatElapsed, formatWallTime } from "./format-time.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
 import { type KillResultDetails, type OutputResultDetails, type ProcessResultDetails, WAIT_CANCELLED, WAIT_STEERED } from "./tool-result.ts";
@@ -58,8 +59,6 @@ interface DetailsShape extends Partial<OutputResultDetails> {
 	escalated?: boolean;
 	yield_time_ms?: number;
 	wait_status?: string;
-	completion_notification?: string;
-	wake_armed?: boolean;
 }
 
 interface SessionListItem {
@@ -70,7 +69,7 @@ interface SessionListItem {
 	pid?: number;
 	elapsed_ms: number;
 	running: boolean;
-	wake_armed: boolean;
+	on_exit?: OnExitStatus;
 	exit_code?: number | null;
 	signal?: string;
 	failure_message?: string;
@@ -395,7 +394,7 @@ function buildStatusLine(
 	if (details.failure_message) bits.push(theme.fg("error", `failure: ${safeOneLine(details.failure_message)}`));
 	if (details.wait_status === WAIT_CANCELLED) bits.push(theme.fg("warning", "cancelled"));
 	if (details.wait_status === WAIT_STEERED) bits.push(theme.fg("accent", "steered"));
-	if (details.completion_notification === "armed") bits.push(theme.fg("muted", "wake armed"));
+	if (details.on_exit) bits.push(theme.fg("muted", `on_exit=${details.on_exit}`));
 	if (typeof details.log === "number") bits.push(theme.fg("muted", `log=${details.log}`));
 
 	// A highlight resets the foreground, so each separator sets its own color.
@@ -460,7 +459,7 @@ export function renderListSessionsResult(
 									? `exited=${session.exit_code}`
 									: `signal=${safeOneLine(session.signal ?? "?")}`,
 							);
-					const wake = session.wake_armed ? theme.fg("warning", " [wake]") : "";
+					const wake = session.on_exit ? theme.fg("muted", ` on_exit=${session.on_exit}`) : "";
 					const command = safeOneLine(session.command, 100);
 					const line = `#${session.session_id} pid=${session.pid ?? "?"} ${session.tty ? "tty" : "pipe"} ${formatElapsed(session.elapsed_ms)} ${state}${wake} ${command}`;
 					lines.push(truncateToWidth(line, width, "..."));

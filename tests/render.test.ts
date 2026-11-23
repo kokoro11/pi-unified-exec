@@ -234,6 +234,7 @@ describe("unified-exec renderers", () => {
 			signal: null,
 			failure: null,
 			tty: false,
+			extra: { on_exit: "wake" },
 		});
 		const firstResult = {
 			content: [{ type: "text", text: renderProcessResultText(firstDetails) }],
@@ -241,6 +242,7 @@ describe("unified-exec renderers", () => {
 		} as any;
 		const first = renderProcessResult(firstResult, { expanded: false, isPartial: true }, plainTheme, context(state));
 		assert.match(rendered(first), /old-8/);
+		assert.match(rendered(first), /on_exit=wake/);
 
 		const nextDetails = finalizeProcessResult({
 			operation: "write_stdin",
@@ -295,7 +297,7 @@ describe("unified-exec renderers", () => {
 			pid: 1000 + index,
 			elapsed_ms: 1234.56 * (index + 1),
 			running: true,
-			wake_armed: index === 0,
+			on_exit: index === 0 ? "wake" : undefined,
 			log: index + 1,
 		}));
 		let firstCommandReads = 0;
@@ -314,6 +316,7 @@ describe("unified-exec renderers", () => {
 		const collapsedText = rendered(collapsed);
 		assert.match(collapsedText, /#1 /);
 		assert.match(collapsedText, /#1 pid=1000 pipe 1\.235s/);
+		assert.match(collapsedText, /on_exit=wake/);
 		assert.match(collapsedText, /#5 /);
 		assert.doesNotMatch(collapsedText, /#6 /);
 		assert.match(collapsedText, /2 more sessions/);

@@ -272,7 +272,7 @@ describe("steer interrupt e2e", () => {
 		setTimeout(() => void h.steer(), 150);
 		const r = await h.call("write_stdin", { session_id: sid, yield_time_ms: 600_000 });
 		assert.match(r.details.wait_status, /^Read and address the user's steering message first\./);
-		assert.equal(r.details.completion_notification, "armed");
+		assert.equal(r.details.on_exit, "wake");
 	});
 
 	it("ends exec_command's yield early but still returns a live session", async () => {

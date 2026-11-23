@@ -7,7 +7,7 @@
 
 import { Type, type Static } from "typebox";
 
-import type { OnExitPolicy } from "./completion.ts";
+import type { OnExitStatus } from "./completion.ts";
 import {
 	type KillResultDetails,
 	type ProcessResultDetails,
@@ -29,6 +29,10 @@ const logSchema = Type.Optional(Type.Integer({
 	description: "Log sequence number.",
 }));
 
+const onExitSchema = Type.Optional(Type.Union([Type.Literal("wake"), Type.Literal("consumed")], {
+	description: "Wake policy active, or the wake has already been resolved.",
+}));
+
 const outputFields = {
 	output: Type.String({
 		description: "Bounded, terminal-safe tail of the child output with real newlines.",
@@ -48,7 +52,7 @@ const processScriptDetailFields = {
 	...outputFields,
 	note: Type.Optional(Type.String()),
 	wait_status: Type.Optional(Type.String({ description: "Plain-language guidance present only when a wait is cancelled or steered." })),
-	on_exit: Type.Optional(Type.Union([Type.Literal("none"), Type.Literal("wake")])),
+	on_exit: onExitSchema,
 };
 
 const processTextSchema = Type.String({ description: "Formatted tool reply with process status and output." });
@@ -114,6 +118,7 @@ export const killScriptResultSchema = Type.Object({
 		total_time_seconds: Type.Optional(Type.Number({
 			description: "Session lifetime in seconds, frozen at exit. Omitted when no session had this id.",
 		})),
+		on_exit: onExitSchema,
 		...outputFields,
 	}),
 	text: Type.String({ description: "Formatted kill result with status, session ID, timing, and output." }),
@@ -130,6 +135,7 @@ export function killScriptResult(shape: KillResultDetails): KillScriptResult {
 			session_id: shape.session_id,
 			pid: shape.pid,
 			total_time_seconds: shape.total_time_seconds,
+			on_exit: shape.on_exit,
 			output: shape.output,
 			truncated: shape.truncation?.truncated === true,
 			omitted_bytes: shape.omitted_bytes || undefined,
@@ -164,7 +170,7 @@ export function killNotFoundScriptResult(sessionId: number): KillScriptResult {
 export const setOnExitScriptResultSchema = Type.Object({
 	session_id: Type.Number(),
 	found: Type.Boolean({ description: "False when no session or pending wake had this id." }),
-	on_exit: Type.Optional(Type.Union([Type.Literal("none"), Type.Literal("wake")])),
+	on_exit: onExitSchema,
 	status: Type.Optional(Type.String()),
 	running: Type.Optional(Type.Boolean()),
 	wake_armed: Type.Optional(Type.Boolean()),
@@ -174,7 +180,7 @@ export type SetOnExitScriptResult = Static<typeof setOnExitScriptResultSchema>;
 export function setOnExitScriptResult(value: {
 	session_id: number;
 	found: boolean;
-	on_exit?: OnExitPolicy;
+	on_exit?: OnExitStatus;
 	status?: string;
 	running?: boolean;
 	wake_armed?: boolean;
@@ -192,6 +198,7 @@ export const listSessionsScriptResultSchema = Type.Object({
 			pid: Type.Optional(Type.Number()),
 			elapsed_ms: Type.Number(),
 			running: Type.Boolean({ description: "False for sessions that just exited; they are removed after this listing." }),
+			on_exit: onExitSchema,
 			wake_armed: Type.Boolean(),
 			exit_code: Type.Optional(Type.Number()),
 			signal: Type.Optional(Type.String()),
@@ -212,6 +219,7 @@ export function listSessionsScriptResult(value: {
 		pid?: number;
 		elapsed_ms: number;
 		running: boolean;
+		on_exit?: OnExitStatus;
 		wake_armed: boolean;
 		exit_code?: number | null;
 		signal?: string;
@@ -230,6 +238,7 @@ export function listSessionsScriptResult(value: {
 				pid: s.pid,
 				elapsed_ms: s.elapsed_ms,
 				running: s.running,
+				on_exit: s.on_exit,
 				wake_armed: s.wake_armed,
 				exit_code: s.exit_code ?? undefined,
 				signal: optionalMeta(s.signal),

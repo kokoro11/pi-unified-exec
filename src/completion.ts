@@ -31,6 +31,7 @@ import { OUTPUT_LOG_PATH_TEMPLATE } from "./output-log.ts";
  */
 
 export type OnExitPolicy = "none" | "wake";
+export type OnExitStatus = "wake" | "consumed";
 
 /** Minimal session surface the coordinator needs (test-fakeable). */
 export interface CompletionSessionLike {
@@ -111,6 +112,7 @@ function oneLine(raw: string, max: number): string {
 
 export class CompletionCoordinator {
 	private readonly records = new Map<number, CompletionRecord>();
+	private readonly consumedWakes = new WeakSet<CompletionSessionLike>();
 	private readonly opts: Required<Pick<CompletionCoordinatorOptions, "send" | "debounceMs">> &
 		CompletionCoordinatorOptions;
 	private debounceHandle: unknown;
@@ -170,6 +172,12 @@ export class CompletionCoordinator {
 	isArmed(sessionId: number): boolean {
 		const r = this.records.get(sessionId);
 		return !!r && r.armed && !r.observed && !r.suppressed;
+	}
+
+	/** Report the policy even while a kill is temporarily suppressing delivery. */
+	onExitStatus(session: CompletionSessionLike): OnExitStatus | undefined {
+		if (this.records.get(session.id)?.session === session) return "wake";
+		if (this.consumedWakes.has(session)) return "consumed";
 	}
 
 	/**
@@ -290,7 +298,7 @@ export class CompletionCoordinator {
 
 	private commitObserved(record: CompletionRecord): void {
 		record.observed = true;
-		this.resolveRecord(record);
+		this.consumeRecord(record);
 	}
 
 	/**
@@ -317,7 +325,7 @@ export class CompletionCoordinator {
 	/** The kill landed; the record is finished. */
 	confirmKill(sessionId: number): void {
 		const r = this.records.get(sessionId);
-		if (r) this.resolveRecord(r);
+		if (r) this.consumeRecord(r);
 	}
 
 	/** The kill did NOT land and the process is still alive: restore eligibility. */
@@ -371,6 +379,12 @@ export class CompletionCoordinator {
 	private resolveRecord(record: CompletionRecord): void {
 		record.unsubscribeExit();
 		this.records.delete(record.sessionId);
+	}
+
+	private consumeRecord(record: CompletionRecord): void {
+		// Tools can still hold the exited session after its wake record is gone.
+		this.consumedWakes.add(record.session);
+		if (this.records.get(record.sessionId) === record) this.resolveRecord(record);
 	}
 
 	// ---------------- Wake delivery ----------------
@@ -428,15 +442,11 @@ export class CompletionCoordinator {
 		if (sendResult && typeof (sendResult as Promise<void>).then === "function") {
 			(sendResult as Promise<void>)
 				.then(() => {
-					for (const r of deliver) {
-						if (this.records.has(r.sessionId)) this.resolveRecord(r);
-					}
+					for (const r of deliver) this.consumeRecord(r);
 				})
 				.catch((err) => this.recoverFailedSend(deliver, err));
 		} else {
-			for (const r of deliver) {
-				if (this.records.has(r.sessionId)) this.resolveRecord(r);
-			}
+			for (const r of deliver) this.consumeRecord(r);
 		}
 	}
 

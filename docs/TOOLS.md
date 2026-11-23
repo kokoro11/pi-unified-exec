@@ -44,11 +44,13 @@ In `chars`, use `\n` for a pipe's newline, `\r` for Enter in a terminal (includi
 | --- | --- | --- |
 | `set_on_exit` | `session_id`, `on_exit` (`"none"` or `"wake"`) | Disarm a pending wake without killing the process, or arm a live session. An unknown ID returns `found: false`. |
 | `kill_session` | `session_id`, optional `signal` (default `SIGTERM`) | Suppress a pending wake and stop the child. On POSIX, escalate to `SIGKILL` after two seconds as needed. On Windows, force-terminate the session's Job Object, including descendants whose parents have exited. An unconfirmed kill leaves the session registered. |
-| `list_sessions` | None | Include `session_id`, `running`, `wake_armed`, and `log` when available. Report each unobserved exit once, then remove it from the list. |
+| `list_sessions` | None | Include `session_id`, `running`, and `wake_armed`, plus `on_exit` and `log` when applicable. Report each unobserved exit once, then remove it from the list. |
 
 `kill_session` reports `[killed #N]` or `[kill failed #N]`. For a known session, `total_time` covers its lifetime from launch and stops at exit; `wall_time` measures the kill call. The text shows a PID only while the session remains running, and reports `escalated` only when true. A missing session reports `[kill failed #N]` with a failure message and omits its unknown lifetime.
 
 A wake sends a follow-up with exit metadata and a log number when available. Any successful tool result that observes the completion consumes the pending wake. A deadline, steer, or cancellation keeps it armed. Use `set_on_exit` with `"none"` when you no longer want a wake; a follow-up already queued to Pi stays queued.
+
+Tool replies and Codemode details report `on_exit: "wake"` while a wake is active. They report `on_exit: "consumed"` when the exit is returned directly, the follow-up has been sent, or a successful kill retires the wake. The `on_exit` field is omitted for sessions without a wake policy, including after disarming a pending wake.
 
 ## Output and logs
 

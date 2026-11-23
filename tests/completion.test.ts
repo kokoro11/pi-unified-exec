@@ -113,10 +113,12 @@ describe("CompletionCoordinator", () => {
 		assert.equal(sent.length, 0, "exit held while observed");
 		// Handler returned a terminal result; pi finalizes it successfully.
 		coordinator.markPendingTerminal(1, "call-1");
+		assert.equal(coordinator.onExitStatus(s), "wake");
 		coordinator.handleToolExecutionEnd("call-1", false);
 		await settle();
 		assert.equal(sent.length, 0, "direct delivery consumed the wake");
 		assert.equal(coordinator.recordCount, 0);
+		assert.equal(coordinator.onExitStatus(s), "consumed");
 	});
 
 	it("terminal result finalized as error keeps the completion wake-eligible", async () => {

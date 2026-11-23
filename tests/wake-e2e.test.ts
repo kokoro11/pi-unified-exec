@@ -129,6 +129,20 @@ async function waitFor(cond: () => boolean | Promise<boolean>, timeoutMs = 8000)
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+function assertOnExit(result: Awaited<ReturnType<ToolDef["execute"]>>, expected?: "wake" | "consumed"): void {
+	const scriptDetails = result.structuredContent.details ?? result.structuredContent;
+	for (const details of [result.details, scriptDetails]) {
+		assert.equal(Object.hasOwn(details, "on_exit"), expected !== undefined);
+		assert.equal(details.on_exit, expected);
+		assert.equal(Object.hasOwn(details, "completion_notification"), false);
+		assert.equal(Object.hasOwn(details, "on_exit_wake"), false);
+	}
+	const text = result.content[0].text;
+	if (expected) assert.match(text, new RegExp(`^on_exit: ${expected}$`, "m"));
+	else assert.doesNotMatch(text, /^on_exit:/m);
+	assert.doesNotMatch(text, /^(?:completion_notification|on_exit_wake):/m);
+}
+
 describe("write_stdin attached waits", () => {
 	it("retains only bounded output during a long noisy wait", async () => {
 		const h = makeHarness();
@@ -190,12 +204,17 @@ describe("write_stdin attached waits", () => {
 		const h = makeHarness();
 		await h.emit("session_start");
 		const r1 = await h.call("exec_command", { cmd: "sleep 6.2", yield_time_ms: 250, on_exit: "wake" });
-		const r2 = await h.call("write_stdin", { session_id: r1.details.session_id });
+		const updateStates: unknown[] = [];
+		const r2 = await h.call("write_stdin", { session_id: r1.details.session_id }, undefined, (update) => {
+			updateStates.push(update.details.on_exit);
+		});
 		assert.equal(r2.details.yield_time_ms, 5000);
 		assert.equal(Object.hasOwn(r2.details, "wait_status"), false);
 		assert.equal(Object.hasOwn(r2.structuredContent.details, "wait_status"), false);
 		assert.equal(r2.details.running, true);
-		assert.equal(r2.details.completion_notification, "armed");
+		assertOnExit(r2, "wake");
+		assert.ok(updateStates.length > 0);
+		assert.ok(updateStates.every((state) => state === "wake"));
 		assert.ok(r2.details.effective_wait_ms >= 4900);
 		assert.equal(h.sentMessages.length, 0);
 		await h.finalizeTool(r2.toolCallId, false);
@@ -215,12 +234,13 @@ describe("exec_command on_exit", () => {
 		const r2 = await h.call("exec_command", { cmd: "sleep 0.3", yield_time_ms: 250, on_exit: "none" });
 		assert.ok(typeof r1.details.session_id === "number");
 		assert.ok(typeof r2.details.session_id === "number");
-		assert.equal(r2.details.completion_notification, undefined);
+		assertOnExit(r1);
+		assertOnExit(r2);
 		await new Promise((r) => setTimeout(r, 1200)); // both exit + debounce window
 		assert.equal(h.sentMessages.length, 0);
 		// Drain them.
-		await h.call("write_stdin", { session_id: r1.details.session_id, yield_time_ms: 5000 });
-		await h.call("write_stdin", { session_id: r2.details.session_id, yield_time_ms: 5000 });
+		assertOnExit(await h.call("write_stdin", { session_id: r1.details.session_id, yield_time_ms: 5000 }));
+		assertOnExit(await h.call("write_stdin", { session_id: r2.details.session_id, yield_time_ms: 5000 }));
 		await h.emit("session_shutdown");
 	});
 
@@ -230,6 +250,7 @@ describe("exec_command on_exit", () => {
 		const r = await h.call("exec_command", { cmd: "echo quick", yield_time_ms: 5000, on_exit: "wake" });
 		assert.equal(r.details.exit_code, 0);
 		assert.equal(r.details.session_id, undefined);
+		assertOnExit(r, "consumed");
 		await new Promise((res) => setTimeout(res, 600));
 		assert.equal(h.sentMessages.length, 0);
 		await h.emit("session_shutdown");
@@ -247,9 +268,7 @@ describe("exec_command on_exit", () => {
 		});
 		const sid = r1.details.session_id;
 		assert.ok(typeof sid === "number", JSON.stringify(r1.details));
-		assert.equal(r1.details.completion_notification, "armed");
-		assert.equal(r1.details.on_exit, "wake");
-		assert.ok(r1.content[0].text.includes("completion_notification: armed"), r1.content[0].text);
+		assertOnExit(r1, "wake");
 
 		assert.ok(await waitFor(() => h.sentMessages.length === 1), "expected one wake");
 		const { message, options } = h.sentMessages[0];
@@ -264,6 +283,7 @@ describe("exec_command on_exit", () => {
 		const r2 = await h.call("write_stdin", { session_id: sid, yield_time_ms: 5000 });
 		assert.equal(r2.details.exit_code, 0);
 		assert.ok(r2.details.output.includes("BYE"));
+		assertOnExit(r2, "consumed");
 		await h.finalizeTool(r2.toolCallId, false);
 		// …and consuming it does not send another wake.
 		await new Promise((res) => setTimeout(res, 600));
@@ -279,7 +299,7 @@ describe("exec_command on_exit", () => {
 		const r2 = await h.call("write_stdin", { session_id: sid, yield_time_ms: 900_000 });
 		assert.equal(r2.details.exit_code, 0);
 		assert.equal(r2.details.completion_delivery, "direct");
-		assert.equal(r2.details.on_exit_wake, "consumed");
+		assertOnExit(r2, "consumed");
 		await h.finalizeTool(r2.toolCallId, false);
 		await new Promise((res) => setTimeout(res, 600));
 		assert.equal(h.sentMessages.length, 0);
@@ -296,7 +316,7 @@ describe("exec_command on_exit", () => {
 		setTimeout(() => ac.abort(), 150);
 		const r2 = await inflight;
 		assert.match(r2.details.wait_status, /^Follow the user's latest instruction before polling this session again\./);
-		assert.equal(r2.details.completion_notification, "armed");
+		assertOnExit(r2, "wake");
 		await h.finalizeTool(r2.toolCallId, true); // pi records the cancelled call as error
 		assert.ok(await waitFor(() => h.sentMessages.length === 1), "wake after later exit");
 		await new Promise((res) => setTimeout(res, 600));
@@ -331,6 +351,7 @@ describe("exec_command on_exit", () => {
 		const r2 = await h.call("set_on_exit", { session_id: sid, on_exit: "none" });
 		assert.equal(r2.details.status, "disarmed");
 		assert.equal(r2.details.wake_armed, false);
+		assertOnExit(r2);
 		// Wait until the process is gone (list reaps it) then confirm no wake.
 		assert.ok(
 			await waitFor(async () => {
@@ -357,6 +378,7 @@ describe("exec_command on_exit", () => {
 		const r2 = await h.call("set_on_exit", { session_id: sid, on_exit: "wake" });
 		assert.equal(r2.details.status, "armed");
 		assert.equal(r2.details.wake_armed, true);
+		assertOnExit(r2, "wake");
 		assert.ok(await waitFor(() => h.sentMessages.length === 1), "armed session should wake");
 		await h.call("write_stdin", { session_id: sid, yield_time_ms: 5000 }).catch(() => {});
 	});
@@ -368,17 +390,28 @@ describe("exec_command on_exit", () => {
 		assert.equal(r.details.found, false);
 	});
 
-	it("list_sessions reports wake_armed for live wake sessions", async () => {
+	it("list_sessions reports a live wake and consumes it when listing the exit", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
-		const r1 = await h.call("exec_command", { cmd: "sleep 30", yield_time_ms: 250, on_exit: "wake" });
+		const r1 = await h.call("exec_command", { cmd: "sleep 1", yield_time_ms: 250, on_exit: "wake" });
 		const sid = r1.details.session_id;
 		const l = await h.call("list_sessions", {});
-		const entry = l.details.sessions.find((s: any) => s.session_id === sid);
-		assert.ok(entry);
-		assert.equal(entry.wake_armed, true);
-		assert.match(l.content[0].text, /wake/);
-		await h.call("kill_session", { session_id: sid });
+		assert.equal(l.details.sessions[0].session_id, sid);
+		assert.equal(l.details.sessions[0].wake_armed, true);
+		assert.equal(l.details.sessions[0].on_exit, "wake");
+		assert.equal(l.structuredContent.sessions[0].on_exit, "wake");
+		assert.match(l.content[0].text, /^\s+on_exit: wake$/m);
+
+		assert.ok(await waitFor(async () => {
+			const exited = await h.call("list_sessions", {});
+			if (exited.details.just_exited_count === 0) return false;
+			assert.equal(exited.details.sessions[0].on_exit, "consumed");
+			assert.equal(exited.structuredContent.sessions[0].on_exit, "consumed");
+			assert.match(exited.content[0].text, /^\s+on_exit: consumed$/m);
+			return true;
+		}));
+		await sleep(400);
+		assert.equal(h.sentMessages.length, 0);
 	});
 
 	it("explicit model kill suppresses the wake", async () => {
@@ -386,7 +419,8 @@ describe("exec_command on_exit", () => {
 		await h.emit("session_start");
 		const r1 = await h.call("exec_command", { cmd: "sleep 30", yield_time_ms: 250, on_exit: "wake" });
 		const sid = r1.details.session_id;
-		await h.call("kill_session", { session_id: sid });
+		const killed = await h.call("kill_session", { session_id: sid });
+		assertOnExit(killed, "consumed");
 		assert.ok(!(await waitFor(() => h.sentMessages.length > 0, 600)));
 		assert.equal(h.sentMessages.length, 0);
 	});
