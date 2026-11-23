@@ -18,7 +18,6 @@ import {
 	killScriptResult,
 	killScriptResultSchema,
 	listSessionsScriptResultSchema,
-	setOnExitScriptResultSchema,
 } from "../src/script-result.ts";
 import { IS_WINDOWS } from "../src/shell.ts";
 import {
@@ -174,7 +173,8 @@ describe("script result projections", () => {
 describe("registered tools return structuredContent", () => {
 	it("every tool declares an outputSchema", () => {
 		const { tools } = makeHarness();
-		for (const name of ["exec_command", "write_stdin", "kill_session", "list_sessions", "set_on_exit"]) {
+		assert.deepEqual(Object.keys(tools).sort(), ["exec_command", "kill_session", "list_sessions", "write_stdin"]);
+		for (const name of Object.keys(tools)) {
 			assert.ok(tools[name]?.outputSchema, `${name} must declare outputSchema`);
 		}
 	});
@@ -196,7 +196,7 @@ describe("registered tools return structuredContent", () => {
 		assert.equal(Object.hasOwn(result.structuredContent.details, "total_time_seconds"), false);
 	});
 
-	it("write_stdin, list_sessions, set_on_exit and kill_session cover live and unknown sessions", async () => {
+	it("write_stdin, list_sessions and kill_session cover live and unknown sessions", async () => {
 		const { call, tools } = makeHarness();
 		const started = await call("exec_command", {
 			cmd: `node -e "setTimeout(() => {}, 30000)"`,
@@ -225,16 +225,15 @@ describe("registered tools return structuredContent", () => {
 		assert.equal(Object.hasOwn(listed.structuredContent.sessions[0], "on_exit"), false);
 		assert.equal(Object.hasOwn(listed.structuredContent, "tool_time_utc"), false);
 
-		const armed = await call("set_on_exit", { session_id: sid, on_exit: "wake" });
-		assert.ok(Value.Check(setOnExitScriptResultSchema, armed.structuredContent));
-		assert.equal(armed.structuredContent.wake_armed, true);
-		const disarmed = await call("set_on_exit", { session_id: sid, on_exit: "none" });
-		assert.ok(Value.Check(setOnExitScriptResultSchema, disarmed.structuredContent));
-		assert.equal(disarmed.structuredContent.on_exit, "none");
-		await call("set_on_exit", { session_id: sid, on_exit: "wake" });
-		const unknownOnExit = await call("set_on_exit", { session_id: 999_999, on_exit: "wake" });
-		assert.ok(Value.Check(setOnExitScriptResultSchema, unknownOnExit.structuredContent));
-		assert.equal(unknownOnExit.structuredContent.found, false);
+		const armed = await call("write_stdin", { session_id: sid, on_exit: "wake" });
+		assert.ok(Value.Check(tools.write_stdin.outputSchema, armed.structuredContent));
+		assert.equal(armed.structuredContent.details.on_exit, "wake");
+		await assert.rejects(call("write_stdin", { session_id: sid, on_exit: "none", yield_time_ms: -1 }), /yield_time_ms/);
+		const disarmed = await call("write_stdin", { session_id: sid, on_exit: "none" });
+		assert.ok(Value.Check(tools.write_stdin.outputSchema, disarmed.structuredContent));
+		assert.equal(disarmed.structuredContent.details.on_exit, "none");
+		await call("write_stdin", { session_id: sid, on_exit: "wake" });
+		await assert.rejects(call("write_stdin", { session_id: 999_999, on_exit: "wake" }), /unknown session_id/);
 
 		const killed = await call("kill_session", { session_id: sid });
 		assert.ok(Value.Check(killScriptResultSchema, killed.structuredContent));
@@ -258,8 +257,14 @@ describe("actual Pi codemode", () => {
 			const agentDir = join(root, "agent");
 			mkdirSync(agentDir);
 			const cmd = `node -e "for (let i = 1; i <= 40; i++) console.log('line of build output number', i)"`;
+			const inputCmd = `node -e "process.stdin.once('data', () => process.exit(0))"`;
+			const shell = IS_WINDOWS ? "cmd" : "bash";
 			const script = String.raw`
-const r = await tools.exec_command(${JSON.stringify({ cmd, shell: IS_WINDOWS ? "cmd" : "bash", yield_time_ms: 5000, on_exit: "wake" })});
+const r = await tools.exec_command(${JSON.stringify({ cmd, shell, yield_time_ms: 5000, on_exit: "wake" })});
+const live = await tools.exec_command(${JSON.stringify({ cmd: inputCmd, shell, yield_time_ms: 250 })});
+const session_id = live.details.session_id;
+const armed = await tools.write_stdin({ session_id, on_exit: "wake" });
+const disarmed = await tools.write_stdin({ session_id, on_exit: "none", chars: "x", yield_time_ms: 5000 });
 const decl = await describeTool("exec_command");
 const pollDetails = (await describeTool("write_stdin")).split(/details:\s*\{/)[1];
 text({
@@ -267,6 +272,9 @@ text({
   lines: r.details.output.trimEnd().split("\n").length,
   log: r.details.log,
   on_exit: r.details.on_exit,
+  armed: armed.details.on_exit,
+  disarmed: disarmed.details.on_exit,
+  disarmedExit: disarmed.details.exit_code,
   execDeclared: /details:\s*\{/.test(decl) && /text:\s*string/.test(decl) && !decl.includes("total_time_seconds"),
   pollDeclared: /\bsession_id:\s*number\b/.test(pollDetails) && /\btotal_time_seconds:\s*number\b/.test(pollDetails),
 });
@@ -318,7 +326,10 @@ export default function(pi) {
 				.join("\n");
 			const summaryText = output.match(/^\{"exit_code".*\}$/m)?.[0];
 			assert.ok(summaryText, output);
-			assert.deepEqual(JSON.parse(summaryText), { exit_code: 0, lines: 40, log: 1, on_exit: "consumed", execDeclared: true, pollDeclared: true });
+			assert.deepEqual(JSON.parse(summaryText), {
+				exit_code: 0, lines: 40, log: 1, on_exit: "consumed", armed: "wake", disarmed: "none",
+				disarmedExit: 0, execDeclared: true, pollDeclared: true,
+			});
 			assert.match(output, /^\[exited ok\]\n/m);
 			assert.match(output, /^on_exit: consumed$/m);
 			assert.match(output, /^log: 1$/m);

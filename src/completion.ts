@@ -3,7 +3,7 @@ import { OUTPUT_LOG_PATH_TEMPLATE } from "./output-log.ts";
 
 /**
  * CompletionCoordinator — agent-level completion scheduling for
- * `exec_command(on_exit: "wake")`, kept deliberately separate from the
+ * `on_exit: "wake"`, kept deliberately separate from the
  * low-level ExecSession process transport.
  *
  * The central exactly-once invariant:
@@ -14,9 +14,9 @@ import { OUTPUT_LOG_PATH_TEMPLATE } from "./output-log.ts";
  *                   normally never both.
  *
  * How the invariant is enforced:
- *   - A record is only created ("armed") once exec_command has committed to
- *     returning a background session_id.
- *   - Any write_stdin call that could return terminal status takes an
+ *   - A wake is armed when exec_command returns a background session or when
+ *     write_stdin enables the policy for a live session.
+ *   - Any write_stdin call that collects output takes an
  *     OBSERVATION LEASE (keyed by toolCallId). While at least one observer is
  *     active, process exit is recorded but a wake is never enqueued.
  *   - "Observed" is committed at Pi's finalized tool-result event
@@ -67,10 +67,6 @@ interface CompletionRecord {
 	observed: boolean;
 	suppressed: boolean;
 	wakeQueued: boolean;
-	/** toolCallIds of active observation leases. */
-	observers: Set<string>;
-	/** toolCallIds that returned a terminal result awaiting finalization. */
-	pendingTerminal: Set<string>;
 	snapshot: CompletionSnapshot | undefined;
 	session: CompletionSessionLike;
 	unsubscribeExit: () => void;
@@ -112,6 +108,8 @@ function oneLine(raw: string, max: number): string {
 
 export class CompletionCoordinator {
 	private readonly records = new Map<number, CompletionRecord>();
+	/** Per session, tool calls observing it and whether they returned its exit. */
+	private readonly observations = new Map<number, Map<string, boolean>>();
 	private readonly consumedWakes = new WeakSet<CompletionSessionLike>();
 	private readonly opts: Required<Pick<CompletionCoordinatorOptions, "send" | "debounceMs">> &
 		CompletionCoordinatorOptions;
@@ -156,8 +154,6 @@ export class CompletionCoordinator {
 			observed: false,
 			suppressed: false,
 			wakeQueued: false,
-			observers: new Set(),
-			pendingTerminal: new Set(),
 			snapshot: undefined,
 			session,
 			unsubscribeExit: () => {},
@@ -178,6 +174,11 @@ export class CompletionCoordinator {
 	onExitStatus(session: CompletionSessionLike): OnExitStatus | undefined {
 		if (this.records.get(session.id)?.session === session) return "wake";
 		if (this.consumedWakes.has(session)) return "consumed";
+	}
+
+	/** Recover a pending wake's session for a policy-only disarm after eviction. */
+	pendingWakeSession(sessionId: number): CompletionSessionLike | undefined {
+		return this.records.get(sessionId)?.session;
 	}
 
 	/**
@@ -242,7 +243,12 @@ export class CompletionCoordinator {
 	 * While any observer is active, exit is recorded but no wake is enqueued.
 	 */
 	beginObservation(sessionId: number, toolCallId: string): void {
-		this.records.get(sessionId)?.observers.add(toolCallId);
+		let calls = this.observations.get(sessionId);
+		if (!calls) {
+			calls = new Map();
+			this.observations.set(sessionId, calls);
+		}
+		calls.set(toolCallId, false);
 	}
 
 	/**
@@ -251,11 +257,10 @@ export class CompletionCoordinator {
 	 * error). The wake stays armed.
 	 */
 	releaseObservation(sessionId: number, toolCallId: string): void {
-		const r = this.records.get(sessionId);
-		if (!r) return;
-		r.observers.delete(toolCallId);
-		r.pendingTerminal.delete(toolCallId);
-		if (r.exited) this.scheduleFlush();
+		const calls = this.observations.get(sessionId);
+		if (!calls?.delete(toolCallId)) return;
+		if (calls.size === 0) this.observations.delete(sessionId);
+		if (this.records.get(sessionId)?.exited) this.scheduleFlush();
 	}
 
 	/**
@@ -265,10 +270,11 @@ export class CompletionCoordinator {
 	 * observed (success) or released back to wake eligibility (error/cancel).
 	 */
 	markPendingTerminal(sessionId: number, toolCallId: string): void {
-		const r = this.records.get(sessionId);
-		if (!r) return;
-		r.observers.add(toolCallId);
-		r.pendingTerminal.add(toolCallId);
+		if (!this.records.has(sessionId)) {
+			this.releaseObservation(sessionId, toolCallId);
+			return;
+		}
+		this.observations.get(sessionId)?.set(toolCallId, true);
 	}
 
 	/**
@@ -277,20 +283,12 @@ export class CompletionCoordinator {
 	 * on error/cancellation. Also cleans up any stale lease for this call ID.
 	 */
 	handleToolExecutionEnd(toolCallId: string, isError: boolean): void {
-		for (const r of this.records.values()) {
-			if (r.pendingTerminal.has(toolCallId)) {
-				r.pendingTerminal.delete(toolCallId);
-				r.observers.delete(toolCallId);
-				if (!isError) {
-					this.commitObserved(r);
-				} else if (r.exited) {
-					this.scheduleFlush();
-				}
-			} else if (r.observers.has(toolCallId)) {
-				// Handler failed/cancelled before releasing: clean up the lease.
-				r.observers.delete(toolCallId);
-				if (r.exited) this.scheduleFlush();
-			}
+		for (const [sessionId, calls] of this.observations) {
+			const terminal = calls.get(toolCallId);
+			if (terminal === undefined) continue;
+			const record = this.records.get(sessionId);
+			if (record && terminal && !isError) this.commitObserved(record);
+			this.releaseObservation(sessionId, toolCallId);
 		}
 		// Any tool boundary is also a safe point to retry failed sends.
 		this.flushPending();
@@ -368,6 +366,7 @@ export class CompletionCoordinator {
 			r.unsubscribeExit();
 		}
 		this.records.clear();
+		this.observations.clear();
 	}
 
 	/** Re-arm after a new session_start (never resurrects old records). */
@@ -413,7 +412,7 @@ export class CompletionCoordinator {
 				!r.observed &&
 				!r.suppressed &&
 				!r.wakeQueued &&
-				r.observers.size === 0 &&
+				!this.observations.has(r.sessionId) &&
 				r.snapshot
 			) {
 				eligible.push(r);

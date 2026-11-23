@@ -23,7 +23,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Container, Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
 
-import type { OnExitStatus } from "./completion.ts";
+import type { OnExitPolicy, OnExitStatus } from "./completion.ts";
 import { formatElapsed, formatWallTime } from "./format-time.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
 import { type KillResultDetails, type OutputResultDetails, type ProcessResultDetails, WAIT_CANCELLED, WAIT_STEERED } from "./tool-result.ts";
@@ -137,7 +137,7 @@ export function renderExecCommandCall(
 }
 
 export function renderWriteStdinCall(
-	args: { session_id?: number; chars?: string; chars_b64?: string; yield_time_ms?: number },
+	args: { session_id?: number; chars?: string; chars_b64?: string; yield_time_ms?: number; on_exit?: OnExitPolicy },
 	theme: Theme,
 	context: ToolRenderContext<RenderState, typeof args>,
 ): Component {
@@ -147,31 +147,18 @@ export function renderWriteStdinCall(
 	const sid = args?.session_id !== undefined ? args.session_id : "?";
 	const chars = args?.chars ?? "";
 	const b64 = args?.chars_b64 ?? "";
-	const isPoll = chars.length === 0 && b64.length === 0;
-	const op = isPoll
-		? theme.fg("muted", "⟳ poll")
+	const empty = chars.length === 0 && b64.length === 0;
+	const policyOnly = empty && args?.on_exit !== undefined && args.yield_time_ms === undefined;
+	const op = empty
+		? theme.fg("muted", policyOnly ? "write_stdin" : "⟳ poll")
 		: chars.length > 0
 			? theme.fg("toolTitle", theme.bold(`» ${stringifyChars(chars)}`))
 			: theme.fg("toolTitle", theme.bold(`» (base64, ${base64ByteLength(b64)} bytes)`));
 	const yieldSuffix = args?.yield_time_ms
 		? theme.fg("muted", ` (yield ${formatElapsed(args.yield_time_ms)})`)
 		: "";
-	const banner = `${op} ${theme.fg("muted", `→ session_id=${sid}`)}${yieldSuffix}`;
-
-	const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
-	text.setText(banner);
-	return text;
-}
-
-export function renderSetOnExitCall(
-	args: { session_id?: number; on_exit?: unknown },
-	theme: Theme,
-	context: ToolRenderContext<RenderState, typeof args>,
-): Component {
-	const sid = args?.session_id !== undefined ? args.session_id : "?";
-	const policy = typeof args?.on_exit === "string" ? safeOneLine(args.on_exit) : "?";
-	const banner =
-		theme.fg("toolTitle", theme.bold("set_on_exit")) + theme.fg("muted", ` session_id=${sid} → ${policy}`);
+	const policy = args?.on_exit === "none" || args?.on_exit === "wake" ? ` on_exit=${args.on_exit}` : "";
+	const banner = `${op} ${theme.fg("muted", `→ session_id=${sid}${policy}`)}${yieldSuffix}`;
 	const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
 	text.setText(banner);
 	return text;
@@ -401,19 +388,7 @@ function buildStatusLine(
 	return bits.join(theme.fg("muted", " · "));
 }
 
-// ---------------- small structured results ----------------
-
-export function renderSetOnExitResult(
-	result: AgentToolResult<Record<string, unknown>>,
-	_options: ToolRenderResultOptions,
-	theme: Theme,
-	_context: ToolRenderContext<RenderState, any>,
-): Component {
-	const found = result.details?.found;
-	const message = sanitizeOutputText(getContentText(result));
-	const color = found === false ? "error" : "muted";
-	return new Text(message ? `\n${theme.fg(color, message)}` : "", 0, 0);
-}
+// ---------------- session list ----------------
 
 class ListResultContainer extends Container {}
 

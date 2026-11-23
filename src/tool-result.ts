@@ -40,7 +40,7 @@ export interface OutputResultDetails {
 	failure_message?: string;
 	tty?: boolean;
 	log?: number;
-	on_exit?: OnExitStatus;
+	on_exit?: OnExitStatus | "none";
 	cwd?: string;
 	command?: string;
 	truncation?: TruncationResult;
@@ -63,6 +63,7 @@ export interface ProcessResultDetails extends OutputResultDetails {
 export interface KillResultDetails extends OutputResultDetails {
 	operation: "kill_session";
 	status: KillStatus;
+	on_exit?: OnExitStatus;
 	found: true;
 	session_id: number;
 	total_time_seconds: number;

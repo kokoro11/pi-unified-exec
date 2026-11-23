@@ -4,8 +4,7 @@
  *
  * Tools exposed to the LLM:
  *   - exec_command(cmd, workdir?, shell?, tty?, yield_time_ms?, on_exit?)
- *   - write_stdin(session_id, chars?, yield_time_ms?)
- *   - set_on_exit(session_id, on_exit)            [disarm/re-arm wake without kill]
+ *   - write_stdin(session_id, chars?, chars_b64?, yield_time_ms?, on_exit?)
  *   - kill_session(session_id, signal?)          [pi-flavor; codex has no equivalent]
  *   - list_sessions()                            [pi-flavor]
  *
@@ -13,8 +12,7 @@
  *   - Every exec_command starts a long-lived session. If the process is still
  *     alive when the call's yield deadline expires, the tool returns with
  *     `[running #N]` and the LLM can follow up with write_stdin.
- *   - `write_stdin` with empty `chars` is a pure poll; with non-empty, it also
- *     writes the bytes (including \\x03 for Ctrl-C, \\x04 for EOF).
+ *   - `write_stdin` can poll, write bytes, or change the wake policy.
  *   - Aborting the tool call (Esc) breaks the wait but does not kill the
  *     session; the next turn can still drive it.
  *   - Sessions are terminated on session_shutdown (codex parity).
@@ -43,8 +41,6 @@ import {
 	renderListSessionsCall,
 	renderListSessionsResult,
 	renderProcessResult,
-	renderSetOnExitCall,
-	renderSetOnExitResult,
 	renderWriteStdinCall,
 } from "./render.ts";
 import {
@@ -55,8 +51,6 @@ import {
 	killScriptResultSchema,
 	listSessionsScriptResult,
 	listSessionsScriptResultSchema,
-	setOnExitScriptResult,
-	setOnExitScriptResultSchema,
 	writeStdinScriptResult,
 	writeStdinScriptResultSchema,
 } from "./script-result.ts";
@@ -191,6 +185,7 @@ type WriteStdinArgs = {
 	chars?: string;
 	chars_b64?: string;
 	yield_time_ms?: number;
+	on_exit?: OnExitPolicy;
 };
 
 /**
@@ -446,8 +441,58 @@ async function runExecCommand(
 
 async function runWriteStdin(
 	ctx: ExtensionCtx,
-	session: ExecSession,
 	args: WriteStdinArgs,
+	signal: AbortSignal | undefined,
+	steerSignal: AbortSignal | undefined,
+	onUpdate: AgentToolUpdateCallback<ProcessUpdateDetails> | undefined,
+	toolCallId: string,
+): Promise<ResponseShape & { session_id: number; total_time_seconds: number }> {
+	const writeBytes = resolveWriteInput(args);
+	const hasInput = writeBytes !== undefined && writeBytes.length > 0;
+	const policy = args.on_exit;
+	const policyOnly = policy !== undefined && !hasInput && args.yield_time_ms === undefined;
+	const sid = args.session_id;
+	const session = ctx.store.get(sid) ??
+		(policyOnly && policy === "none" ? ctx.coordinator.pendingWakeSession(sid) : undefined);
+	if (!(session instanceof ExecSession)) throw new Error(`unknown session_id: ${sid}`);
+	const yieldTimeMs = policyOnly ? undefined : hasInput
+		? clampYield(args.yield_time_ms, DEFAULT_WRITE_STDIN_YIELD_MS)
+		: resolveEmptyPollYield(args.yield_time_ms);
+
+	if (policy !== undefined) signal?.throwIfAborted();
+	const change = policy === undefined ? undefined : ctx.coordinator.setOnExit(sid, policy, session);
+	const shape = yieldTimeMs === undefined
+		? finalizeProcessResult({
+			operation: "write_stdin",
+			sessionId: sid,
+			running: !session.hasExited,
+			exitCode: session.exitCode,
+			signal: session.signal,
+			failure: session.failureMessage,
+			wallTimeSec: 0,
+			collected: new Uint8Array(0),
+			tty: session.tty,
+			log: session.log,
+			cwd: session.cwd,
+			command: session.displayCommand,
+			extra: { on_exit: ctx.coordinator.onExitStatus(session) },
+		})
+		: hasInput
+			? await writeAndCollect(ctx, session, writeBytes, yieldTimeMs, signal, steerSignal, onUpdate, toolCallId)
+			: await runAttachedWait(ctx, session, yieldTimeMs, signal, steerSignal, onUpdate, toolCallId);
+	if (change === "disarmed" && !shape.on_exit) shape.on_exit = "none";
+	if (change === "too_late") {
+		const note = "Could not arm a wake for this session.";
+		shape.note = shape.note ? `${note} ${shape.note}` : note;
+	}
+	return Object.assign(shape, { session_id: sid, total_time_seconds: session.totalTimeSeconds });
+}
+
+async function writeAndCollect(
+	ctx: ExtensionCtx,
+	session: ExecSession,
+	writeBytes: Uint8Array,
+	yieldTimeMs: number,
 	signal: AbortSignal | undefined,
 	steerSignal: AbortSignal | undefined,
 	onUpdate: AgentToolUpdateCallback<ProcessUpdateDetails> | undefined,
@@ -455,13 +500,6 @@ async function runWriteStdin(
 ): Promise<ResponseShape> {
 	const finalizeResponse = (input: Omit<FinalizeInput, "sessionId">): ResponseShape =>
 		finalizeProcessResult({ ...input, operation: "write_stdin", sessionId: session.id });
-	const writeBytes = resolveWriteInput(args);
-	const isEmptyPoll = writeBytes === undefined || writeBytes.length === 0;
-	if (isEmptyPoll) {
-		return runAttachedWait(ctx, session, resolveEmptyPollYield(args.yield_time_ms), signal, steerSignal, onUpdate, toolCallId);
-	}
-
-	const yieldTimeMs = clampYield(args.yield_time_ms, DEFAULT_WRITE_STDIN_YIELD_MS);
 
 	const start = Date.now();
 	session.touch();
@@ -470,39 +508,31 @@ async function runWriteStdin(
 	// concurrent exit is held instead of enqueuing a wake (see completion.ts).
 	ctx.coordinator.beginObservation(session.id, toolCallId);
 	try {
-		let writeFailure: string | null = null;
-		if (writeBytes) {
-			const ok = session.write(writeBytes);
-			if (!ok && !session.hasExited) {
-				// Still running but stdin is gone (child closed it / EPIPE earlier).
-				writeFailure = "stdin write failed: the child closed its stdin; bytes were not delivered";
-			}
-			if (!ok && session.hasExited) {
-				// Session already exited; return its final state.
-				const collected = await session.collect({ deadlineMs: Date.now() + 50, externalAbort: signal });
-				const onExit = ctx.coordinator.onExitStatus(session);
-				removeSession(ctx, session.id);
-				ctx.coordinator.markPendingTerminal(session.id, toolCallId);
-				const wallSec = (Date.now() - start) / 1000;
-				return finalizeResponse({
-					wallTimeSec: wallSec,
-					collected: collected.bytes,
-					omittedBytes: collected.omittedBytes,
-					running: false,
-					exitCode: session.exitCode,
-					signal: session.signal,
-					failure: session.failureMessage,
-					tty: session.tty,
-					log: session.log,
-					cwd: session.cwd,
-					command: session.displayCommand,
-					yieldTimeMs,
-					extra: directCompletionFields(onExit),
-				});
-			}
-			// Give the child a small window to react before the poll.
-			await sleep(100, signal);
+		const ok = session.write(writeBytes);
+		if (!ok && session.hasExited) {
+			const collected = await session.collect({ deadlineMs: Date.now() + 50, externalAbort: signal });
+			const onExit = ctx.coordinator.onExitStatus(session);
+			removeSession(ctx, session.id);
+			ctx.coordinator.markPendingTerminal(session.id, toolCallId);
+			return finalizeResponse({
+				wallTimeSec: (Date.now() - start) / 1000,
+				collected: collected.bytes,
+				omittedBytes: collected.omittedBytes,
+				running: false,
+				exitCode: session.exitCode,
+				signal: session.signal,
+				failure: session.failureMessage,
+				tty: session.tty,
+				log: session.log,
+				cwd: session.cwd,
+				command: session.displayCommand,
+				yieldTimeMs,
+				extra: directCompletionFields(onExit),
+			});
 		}
+		const writeFailure = ok ? null : "stdin write failed: the child closed its stdin; bytes were not delivered";
+		// Give the child a small window to react before the poll.
+		await sleep(100, signal);
 
 		const deadlineMs = start + yieldTimeMs;
 		const pollStream = startStreaming(session, onUpdate, deadlineMs, signal, () => ctx.coordinator.onExitStatus(session));
@@ -737,7 +767,7 @@ function formatRunningSessionsWidget(ctx: ExtensionCtx, sessions: ExecSession[])
 		}),
 	];
 	if (sessions.length > shown.length) lines.push(`  … ${sessions.length - shown.length} more; use list_sessions`);
-	lines.push("  Use list_sessions, write_stdin, set_on_exit (disarm wake), or kill_session.");
+	lines.push("  Use list_sessions, write_stdin (on_exit to change wake), or kill_session.");
 	return lines;
 }
 
@@ -1054,7 +1084,7 @@ export default function (pi: ExtensionAPI) {
 		name: "exec_command",
 		label: "exec_command",
 		description:
-			'Run a command in a persistent session. `[running #N]` means pass N as session_id to write_stdin; `[exited ok]` or `[exited error N]` means the command finished. on_exit defaults to "none". Only pass on_exit: "wake" when the human explicitly wants auto-resume on unobserved exit — stale wakes interrupt later work. Use set_on_exit to disarm or re-arm a running session.',
+			'Run a command in a persistent session. `[running #N]` means pass N as session_id to write_stdin; `[exited ok]` or `[exited error N]` means the command finished. on_exit defaults to "none". Only pass on_exit: "wake" when the human explicitly wants auto-resume on unobserved exit — stale wakes interrupt later work. Use write_stdin with on_exit to change the policy.',
 		promptSnippet: "Run a routine shell command or an async/interactive task",
 		promptGuidelines: [
 			`exec_command: For routine commands do not set yield_time_ms to below ${DEFAULT_EXEC_YIELD_MS}, unless it's a background/async/interactive task. The yield_time_ms of the final write_stdin should also not be set below ${DEFAULT_EXEC_YIELD_MS}.`,
@@ -1090,7 +1120,7 @@ export default function (pi: ExtensionAPI) {
 			on_exit: Type.Optional(
 				StringEnum(
 					["none", "wake"] as const,
-					'"none" (default): no auto-resume; poll with write_stdin. "wake": ONE follow-up notification on unobserved exit that resumes the agent — only when the human explicitly wants auto-resume. Change later via set_on_exit. A completion observed directly by a tool result consumes the wake.',
+					'"none" (default): no auto-resume; poll with write_stdin. "wake": ONE follow-up notification on unobserved exit that resumes the agent — only when the human explicitly wants auto-resume. Change later via write_stdin. A completion observed directly by a tool result consumes the wake.',
 				),
 			),
 		}),
@@ -1114,11 +1144,11 @@ export default function (pi: ExtensionAPI) {
 		name: "write_stdin",
 		label: "write_stdin",
 		description:
-			"Write bytes to a running session. Omit both chars and chars_b64 to poll without writing. Use `chars` for text with C-style escapes (e.g. \\x03 Ctrl-C, \\x1b ESC, \\n newline); use `chars_b64` for raw binary. For empty polls, wait with a finite yield_time_ms (relative, no built-in maximum). The reply keeps the session ID at exit; only poll again if it reports `[running #N]`.",
-		promptSnippet: "Send input, poll a session, or collect its exit result",
+			"Send input, poll for output or exit, or change a session's wake policy. Use `chars` for text with C-style escapes (e.g. \\x03 Ctrl-C, \\x1b ESC, \\n newline) and `chars_b64` for raw binary. With on_exit and neither input nor yield_time_ms, update the policy and return immediately, leaving output buffered. Empty polls accept a finite relative yield_time_ms with no built-in maximum. The reply keeps the session ID at exit.",
+		promptSnippet: "Send input, poll or collect output, or change a session's wake policy",
 		promptGuidelines: [
 			"write_stdin: Don't use chars and chars_b64 at the same time.",
-			'write_stdin: on_exit wake is set via exec_command or set_on_exit, not write_stdin. Observing an exit here consumes an armed wake (direct result). To disarm wake without killing, call set_on_exit(session_id, on_exit: "none").',
+			'write_stdin: Only set on_exit to "wake" when the human asks for auto-resume. To disarm a pending wake promptly, use on_exit: "none" with just the session ID. An exit collected by a poll consumes its wake.',
 			"write_stdin: In tty sessions, submit lines with \\r (the Enter key) rather than \\n: POSIX terminals accept both, but Windows console programs only execute input on \\r.",
 			"exec_command & write_stdin: For very noisy jobs, rely on the log and final/truncated output instead of repeatedly polling.",
 			`exec_command, write_stdin, kill_session, list_sessions: If the tool output contains a log number, you can read ${OUTPUT_LOG_PATH_TEMPLATE.replace("<log>", "<log number>")} under Pi's cwd for the full command output`,
@@ -1143,16 +1173,15 @@ export default function (pi: ExtensionAPI) {
 					description: `Attachment window, same as exec_command. When input exists: default is ${DEFAULT_WRITE_STDIN_YIELD_MS}, clamped to [${MIN_YIELD_TIME_MS}, ${MAX_YIELD_TIME_MS}]. Otherwise, default/minimum is ${MIN_EMPTY_YIELD_TIME_MS}, no built-in maximum.`,
 				}),
 			),
+			on_exit: Type.Optional(StringEnum(
+				["none", "wake"] as const,
+				'Omit to keep the policy. "none" disarms a pending wake. "wake" arms a live session. Without input or yield_time_ms, return immediately.',
+			)),
 		}),
 		async execute(toolCallId, params, signal, onUpdate, eventCtx) {
 			ctx.ui ??= eventCtx.ui;
 			const steerSignal = steerSignalFor(ctx, toolCallId, eventCtx);
-			const session = ctx.store.get(params.session_id);
-			if (!session) throw new Error(`unknown session_id: ${params.session_id}`);
-			const shape = Object.assign(await runWriteStdin(ctx, session, params, signal, steerSignal, onUpdate, toolCallId), {
-				session_id: session.id,
-				total_time_seconds: session.totalTimeSeconds,
-			});
+			const shape = await runWriteStdin(ctx, params, signal, steerSignal, onUpdate, toolCallId);
 			updateRunningSessionsUi(ctx);
 			const structuredContent = writeStdinScriptResult(shape);
 			return {
@@ -1163,73 +1192,6 @@ export default function (pi: ExtensionAPI) {
 		},
 		renderCall: renderWriteStdinCall,
 		renderResult: renderProcessResult,
-	});
-
-	pi.registerTool({
-		name: "set_on_exit",
-		label: "set_on_exit",
-		description:
-			'Change on_exit policy for a session without killing it. on_exit: "none" disarms a pending wake. on_exit: "wake" arms auto-resume if the process is still running. This tool cannot recall a follow-up already queued to the agent. kill_session both kills and suppresses.',
-		promptSnippet: "Disarm or re-arm on_exit wake for a session",
-		promptGuidelines: [
-			'set_on_exit: If you set "wake" and no longer need auto-resume, call set_on_exit with "none" promptly. Only use wake when the user asked for auto-resume.',
-		],
-		outputSchema: setOnExitScriptResultSchema,
-		parameters: Type.Object({
-			session_id: Type.Number({ description: "Session id from exec_command." }),
-			on_exit: StringEnum(
-				["none", "wake"] as const,
-				'"none": disarm wake (process keeps running). "wake": arm auto-resume if still running.',
-			),
-		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, eventCtx) {
-			ctx.ui ??= eventCtx.ui;
-			const { session_id: sid, on_exit: policy } = params as { session_id: number; on_exit: OnExitPolicy };
-			const session = ctx.store.get(sid);
-			if (policy === "wake" && !session) {
-				return {
-					content: [{ type: "text", text: `No such session: ${sid}` }],
-					details: { session_id: sid, found: false },
-					structuredContent: setOnExitScriptResult({ session_id: sid, found: false }),
-				};
-			}
-			const status = ctx.coordinator.setOnExit(sid, policy, session);
-			// unknown id: no store session and nothing to disarm
-			if (!session && status === "already_none") {
-				return {
-					content: [{ type: "text", text: `No such session: ${sid}` }],
-					details: { session_id: sid, found: false },
-					structuredContent: setOnExitScriptResult({ session_id: sid, found: false }),
-				};
-			}
-			const running = session ? !session.hasExited : false;
-			const armed = ctx.coordinator.isArmed(sid);
-			const onExit: OnExitStatus | "none" | undefined =
-				status === "disarmed" ? "none" : session && ctx.coordinator.onExitStatus(session);
-			const result = {
-				session_id: sid,
-				found: true,
-				status,
-				running,
-				wake_armed: armed,
-				...(onExit ? { on_exit: onExit } : {}),
-			};
-			const text =
-				`set_on_exit session_id=${sid} → ${status}` +
-				(session ? (running ? " (process still running)" : " (process already exited)") : " (no store session; coordinator only)") +
-				(onExit ? `\non_exit: ${onExit}` : "");
-			return {
-				content: [{ type: "text", text }],
-				structuredContent: setOnExitScriptResult(result),
-				details: {
-					...result,
-					command: session?.displayCommand,
-					log: session?.log,
-				},
-			};
-		},
-		renderCall: renderSetOnExitCall,
-		renderResult: renderSetOnExitResult,
 	});
 
 	pi.registerTool({

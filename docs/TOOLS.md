@@ -18,13 +18,16 @@ Starts a process and waits for an initial result. A process that finishes during
 
 ## `write_stdin`
 
-Takes a `session_id` from `exec_command`. Omit input to poll, or send input before collecting more output. A terminal result keeps the ID, for example `[exited #4 error 2]`. Continue polling only while `details.running` is true or the header says `[running #N]`.
+Takes a `session_id` from `exec_command`. Omit input to poll, or send input before collecting more output. An exit result keeps the ID, for example `[exited #4 error 2]`. After collecting output, continue polling only while `details.running` is true or the header says `[running #N]`.
 
 | Parameter | Default | Use |
 | --- | --- | --- |
 | `chars` | Empty | Text and C-style escapes, written as UTF-8. |
 | `chars_b64` | Empty | Base64 for exact bytes. Use it instead of `chars`; malformed base64 is rejected. |
 | `yield_time_ms` | `250` with input; `5000` for an empty poll | With input, clamped to 250–30,000 ms. For an empty poll the minimum is 5000 ms and there is no built-in maximum. Supply a finite non-negative duration within `Number.MAX_SAFE_INTEGER`; fractions round down. |
+| `on_exit` | Keep the current policy | `"none"` disarms a pending wake. `"wake"` arms a live session. Use `"wake"` only when the human requests automatic resumption. |
+
+Pass `session_id` and `on_exit` alone to change the wake policy immediately and leave output buffered, even if the session has exited. A separate poll collects that output if the session is still available. This also lets you disarm a pending wake after its session has been evicted. A follow-up already queued to Pi stays queued. If you supply input or `yield_time_ms`, `write_stdin` applies the policy first, then writes or polls as usual.
 
 ### Waiting and cancellation
 
@@ -42,15 +45,14 @@ In `chars`, use `\n` for a pipe's newline, `\r` for Enter in a terminal (includi
 
 | Tool | Parameters | Result |
 | --- | --- | --- |
-| `set_on_exit` | `session_id`, `on_exit` (`"none"` or `"wake"`) | Disarm a pending wake without killing the process, or arm a live session. An unknown ID returns `found: false`. |
 | `kill_session` | `session_id`, optional `signal` (default `SIGTERM`) | Suppress a pending wake and stop the child. On POSIX, escalate to `SIGKILL` after two seconds as needed. On Windows, force-terminate the session's Job Object, including descendants whose parents have exited. An unconfirmed kill leaves the session registered. |
 | `list_sessions` | None | Include `session_id`, `running`, and `wake_armed`, plus `on_exit` and `log` when applicable. Report each unobserved exit once, then remove it from the list. |
 
 `kill_session` reports `[killed #N]` or `[kill failed #N]`. For a known session, `total_time` covers its lifetime from launch and stops at exit; `wall_time` measures the kill call. The text shows a PID only while the session remains running, and reports `escalated` only when true. A missing session reports `[kill failed #N]` with a failure message and omits its unknown lifetime.
 
-A wake sends a follow-up with exit metadata and a log number when available. Any successful tool result that observes the completion consumes the pending wake. A deadline, steer, or cancellation keeps it armed. Use `set_on_exit` with `"none"` when you no longer want a wake; a follow-up already queued to Pi stays queued.
+A wake sends a follow-up with exit metadata and a log number when available. A successful poll or listing that reports the exit consumes a pending wake. A deadline, steer, or cancellation keeps it armed. To disarm promptly, call `write_stdin` with the session ID and `on_exit: "none"`.
 
-Tool replies and Codemode details report `on_exit: "wake"` while a wake is active. They report `on_exit: "consumed"` when the exit is returned directly, the follow-up has been sent, or a successful kill retires the wake. A `set_on_exit` call that disarms a pending wake reports `on_exit: "none"`. Results otherwise omit `on_exit` for sessions without a wake policy.
+Tool replies and Codemode details report `on_exit: "wake"` while a wake is active. They report `on_exit: "consumed"` when an output collection or listing reports the exit, the follow-up has been sent, or a successful kill retires the wake. A `write_stdin` call that disarms a pending wake reports `on_exit: "none"`. Results otherwise omit `on_exit` for sessions without a wake policy.
 
 ## Output and logs
 
@@ -71,7 +73,7 @@ text(r.text);
 
 For `kill_session`, use `details.status` for the outcome, `details.found` to identify a missing session, and `details.running` to check whether it remains registered and running. `details.pid` preserves a known PID, including after exit; `details.total_time_seconds` reports the session lifetime and is omitted when the session is missing. The result has no `killed` field.
 
-`list_sessions` and `set_on_exit` return typed fields directly. See the [result schemas](../src/script-result.ts). The extension caps collapsed Codemode text at ten visual rows across nested tools without enabling Codemode or changing script results or expanded output.
+`list_sessions` returns typed fields directly. See the [result schemas](../src/script-result.ts). The extension caps collapsed Codemode text at ten visual rows across nested tools without enabling Codemode or changing script results or expanded output.
 
 ## Configuration
 

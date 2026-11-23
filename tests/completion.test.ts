@@ -103,11 +103,11 @@ describe("CompletionCoordinator", () => {
 		assert.match(sent[0].content, /exit_code=3/);
 	});
 
-	it("exit while an observer is active is held; successful finalization suppresses the wake", async () => {
+	it("an existing observation holds a newly armed wake until successful finalization", async () => {
 		const { coordinator, sent } = makeCoordinator();
 		const s = new FakeSession(1);
-		coordinator.register(s);
 		coordinator.beginObservation(1, "call-1");
+		assert.equal(coordinator.setOnExit(1, "wake", s), "armed");
 		s.exit(0);
 		await settle();
 		assert.equal(sent.length, 0, "exit held while observed");
@@ -208,8 +208,8 @@ describe("CompletionCoordinator", () => {
 		s.exit(1);
 		// Evict exited session: tombstone keeps the pending wake.
 		coordinator.handleEviction(s);
-		// Disarm by id only (no live session object) — the set_on_exit tool path.
-		assert.equal(coordinator.setOnExit(5, "none", null), "disarmed");
+		assert.equal(coordinator.pendingWakeSession(5), s);
+		assert.equal(coordinator.setOnExit(5, "none", s), "disarmed");
 		await settle();
 		assert.equal(sent.length, 0);
 	});

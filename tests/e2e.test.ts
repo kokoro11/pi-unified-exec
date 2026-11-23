@@ -111,7 +111,7 @@ async function waitFor(cond: () => boolean | Promise<boolean>, timeoutMs = 8000)
 describe("unified-exec e2e", () => {
 	it("registers explicit call/result renderers for every unified-exec tool", () => {
 		const h = makeHarness();
-		for (const name of ["exec_command", "write_stdin", "set_on_exit", "kill_session", "list_sessions"]) {
+		for (const name of ["exec_command", "write_stdin", "kill_session", "list_sessions"]) {
 			assert.equal(typeof h.tools[name]?.renderCall, "function", `${name} renderCall missing`);
 			assert.equal(typeof h.tools[name]?.renderResult, "function", `${name} renderResult missing`);
 		}
@@ -572,7 +572,7 @@ describe("unified-exec e2e", () => {
 		if (!widgetContent) assert.fail(`widget=${JSON.stringify(widget)}`);
 		assert.ok(widgetContent[0].includes("1 session still running"), `widget=${JSON.stringify(widget)}`);
 		assert.ok(widgetContent.some((line) => line.includes(`#${sid}`)), `widget=${JSON.stringify(widget)}`);
-		assert.ok(widgetContent.some((line) => line.includes("set_on_exit") || line.includes("write_stdin")), `widget=${JSON.stringify(widget)}`);
+		assert.ok(widgetContent.some((line) => line.includes("write_stdin")), `widget=${JSON.stringify(widget)}`);
 		assert.ok(
 			h.uiEvents.notifications.some((n) => n.type === "warning" && n.message.includes("still running after /tree")),
 			`notifications=${JSON.stringify(h.uiEvents.notifications)}`,

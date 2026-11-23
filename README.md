@@ -35,9 +35,8 @@ In this example, `exec_command` returns `[running #N]`. The agent passes `N` as 
 | Tool | What the agent can do |
 | --- | --- |
 | `exec_command` | Start a shell command, optionally with a terminal (`tty: true`). |
-| `write_stdin` | Send input or poll an existing session without restarting the command. |
+| `write_stdin` | Send input, poll an existing session, or change its automatic resumption policy. |
 | `list_sessions` | See live sessions, armed wakes, and unreported exits. |
-| `set_on_exit` | Arm or disarm automatic agent resumption without stopping the process. |
 | `kill_session` | Stop a session and suppress its pending wake. |
 
 See the [tool reference](docs/TOOLS.md) for parameters, output logs, waits, configuration, and Codemode scripting.

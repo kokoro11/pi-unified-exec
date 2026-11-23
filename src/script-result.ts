@@ -52,7 +52,6 @@ const processScriptDetailFields = {
 	...outputFields,
 	note: Type.Optional(Type.String()),
 	wait_status: Type.Optional(Type.String({ description: "Plain-language guidance present only when a wait is cancelled or steered." })),
-	on_exit: onExitSchema,
 };
 
 const processTextSchema = Type.String({ description: "Formatted tool reply with process status and output." });
@@ -60,6 +59,7 @@ const processTextSchema = Type.String({ description: "Formatted tool reply with 
 export const execCommandScriptResultSchema = Type.Object({
 	details: Type.Object({
 		...processScriptDetailFields,
+		on_exit: onExitSchema,
 		session_id: Type.Optional(Type.Number({ description: "Session ID when the command is still running." })),
 	}),
 	text: processTextSchema,
@@ -69,6 +69,9 @@ export type ExecCommandScriptResult = Static<typeof execCommandScriptResultSchem
 export const writeStdinScriptResultSchema = Type.Object({
 	details: Type.Object({
 		...processScriptDetailFields,
+		on_exit: Type.Optional(Type.Union([Type.Literal("none"), Type.Literal("wake"), Type.Literal("consumed")], {
+			description: "Wake status. This call reports none when it disarms a pending wake.",
+		})),
 		session_id: Type.Number({ description: "Session ID, retained on exit. Check running before polling again." }),
 		total_time_seconds: Type.Number({ description: "Session lifetime in seconds, frozen at exit." }),
 	}),
@@ -91,20 +94,26 @@ function processScriptResult<T extends Record<string, unknown>>(shape: ProcessRe
 			wall_time_seconds: shape.wall_time_seconds,
 			note: optionalMeta(shape.note),
 			wait_status: shape.wait_status,
-			on_exit: shape.on_exit,
 		}, fields)),
 		text: renderProcessResultText(shape),
 	};
 }
 
 export function execCommandScriptResult(shape: ProcessResultDetails): ExecCommandScriptResult {
-	return processScriptResult(shape, { session_id: shape.session_id });
+	return processScriptResult(shape, {
+		session_id: shape.session_id,
+		on_exit: shape.on_exit === "none" ? undefined : shape.on_exit,
+	});
 }
 
 export function writeStdinScriptResult(
 	shape: ProcessResultDetails & { session_id: number; total_time_seconds: number },
 ): WriteStdinScriptResult {
-	return processScriptResult(shape, { session_id: shape.session_id, total_time_seconds: shape.total_time_seconds });
+	return processScriptResult(shape, {
+		session_id: shape.session_id,
+		total_time_seconds: shape.total_time_seconds,
+		on_exit: shape.on_exit,
+	});
 }
 
 export const killScriptResultSchema = Type.Object({
@@ -165,22 +174,6 @@ export function killNotFoundScriptResult(sessionId: number): KillScriptResult {
 		},
 		text: `[kill failed #${sessionId}]\nfailure: ${failure}`,
 	};
-}
-
-export const setOnExitScriptResultSchema = Type.Object({
-	session_id: Type.Number(),
-	found: Type.Boolean({ description: "False when no session or pending wake had this id." }),
-	on_exit: Type.Optional(Type.Union([Type.Literal("none"), Type.Literal("wake"), Type.Literal("consumed")], {
-		description: "Wake status. None is returned when this call disarms a pending wake.",
-	})),
-	status: Type.Optional(Type.String()),
-	running: Type.Optional(Type.Boolean()),
-	wake_armed: Type.Optional(Type.Boolean()),
-});
-export type SetOnExitScriptResult = Static<typeof setOnExitScriptResultSchema>;
-
-export function setOnExitScriptResult(value: SetOnExitScriptResult): SetOnExitScriptResult {
-	return compact({ ...value });
 }
 
 export const listSessionsScriptResultSchema = Type.Object({

@@ -294,9 +294,9 @@ describe("exec_command on_exit", () => {
 	it("exit during a relative write_stdin observer is delivered directly, no wake", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
-		const r1 = await h.call("exec_command", { cmd: "sleep 0.5", yield_time_ms: 250, on_exit: "wake" });
+		const r1 = await h.call("exec_command", { cmd: "sleep 0.5", yield_time_ms: 250 });
 		const sid = r1.details.session_id;
-		const r2 = await h.call("write_stdin", { session_id: sid, yield_time_ms: 900_000 });
+		const r2 = await h.call("write_stdin", { session_id: sid, on_exit: "wake", yield_time_ms: 900_000 });
 		assert.equal(r2.details.exit_code, 0);
 		assert.equal(r2.details.completion_delivery, "direct");
 		assertOnExit(r2, "consumed");
@@ -338,40 +338,36 @@ describe("exec_command on_exit", () => {
 		await h.emit("session_shutdown");
 	});
 
-	it("set_on_exit none disarms wake; failed job exit does not resume the agent", async () => {
+	it("write_stdin disarms a wake immediately and leaves output available for polling", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
 		const r1 = await h.call("exec_command", {
-			cmd: "sleep 0.8; exit 1",
+			cmd: "sleep 0.8; echo buffered; exit 1",
 			yield_time_ms: 250,
 			on_exit: "wake",
 		});
 		const sid = r1.details.session_id;
 		assert.ok(typeof sid === "number");
-		const r2 = await h.call("set_on_exit", { session_id: sid, on_exit: "none" });
-		assert.equal(r2.details.status, "disarmed");
-		assert.equal(r2.details.wake_armed, false);
+		const r2 = await h.call("write_stdin", { session_id: sid, on_exit: "none" });
+		assert.equal(r2.details.running, true);
+		assert.equal(r2.details.output, "");
 		assertOnExit(r2, "none");
-		const unchanged = await h.call("set_on_exit", { session_id: sid, on_exit: "none" });
-		assert.equal(unchanged.details.status, "already_none");
+		const unchanged = await h.call("write_stdin", { session_id: sid, on_exit: "none" });
 		assertOnExit(unchanged);
-		// Wait until the process is gone (list reaps it) then confirm no wake.
-		assert.ok(
-			await waitFor(async () => {
-				const l = await h.call("list_sessions", {});
-				assert.equal(Object.hasOwn(l.details.sessions[0], "on_exit"), false);
-				assert.equal(Object.hasOwn(l.structuredContent.sessions[0], "on_exit"), false);
-				assert.doesNotMatch(l.content[0].text, /^\s+on_exit:/m);
-				return l.details.active_count === 0;
-			}),
-			"process should exit",
-		);
-		// Debounce window after exit — still no wake.
+		assert.ok(await waitFor(async () => {
+			const policyOnly = await h.call("write_stdin", { session_id: sid, on_exit: "none" });
+			assert.equal(policyOnly.details.output, "");
+			return !policyOnly.details.running;
+		}));
+		const polled = await h.call("write_stdin", { session_id: sid, yield_time_ms: 5000 });
+		assertOnExit(polled);
+		assert.equal(polled.details.exit_code, 1);
+		assert.match(polled.details.output, /buffered/);
 		await sleep(400);
 		assert.equal(h.sentMessages.length, 0, "disarmed wake must not fire");
 	});
 
-	it("set_on_exit wake arms a session started with on_exit none", async () => {
+	it("write_stdin arms a session without waiting for it to exit", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
 		const r1 = await h.call("exec_command", {
@@ -381,19 +377,32 @@ describe("exec_command on_exit", () => {
 		});
 		const sid = r1.details.session_id;
 		assert.ok(typeof sid === "number");
-		const r2 = await h.call("set_on_exit", { session_id: sid, on_exit: "wake" });
-		assert.equal(r2.details.status, "armed");
-		assert.equal(r2.details.wake_armed, true);
+		const r2 = await h.call("write_stdin", { session_id: sid, on_exit: "wake" });
+		assert.equal(r2.details.running, true);
 		assertOnExit(r2, "wake");
 		assert.ok(await waitFor(() => h.sentMessages.length === 1), "armed session should wake");
 		await h.call("write_stdin", { session_id: sid, yield_time_ms: 5000 }).catch(() => {});
 	});
 
-	it("set_on_exit unknown session_id returns found: false", async () => {
+	it("write_stdin applies a new policy before writing input", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
-		const r = await h.call("set_on_exit", { session_id: 99999, on_exit: "none" });
-		assert.equal(r.details.found, false);
+		const started = await h.call("exec_command", {
+			cmd: "read -r line; printf 'received: %s\\n' \"$line\"",
+			yield_time_ms: 250,
+			on_exit: "wake",
+		});
+		const result = await h.call("write_stdin", {
+			session_id: started.details.session_id,
+			on_exit: "none",
+			chars: "hello\\n",
+			yield_time_ms: 5000,
+		});
+		assert.equal(result.details.exit_code, 0);
+		assert.match(result.details.output, /received: hello/);
+		assertOnExit(result, "none");
+		await h.finalizeTool(result.toolCallId);
+		assert.equal(h.sentMessages.length, 0);
 	});
 
 	it("list_sessions reports a live wake and consumes it when listing the exit", async () => {
