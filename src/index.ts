@@ -1163,7 +1163,7 @@ export default function (pi: ExtensionAPI) {
 			),
 			on_exit: Type.Optional(StringEnum(
 				["none", "wake"] as const,
-				'Omit to keep the policy. "none" disarms a pending wake. "wake" arms a live session. Passing on_exit includes the current wake status in the reply. Without input or yield_time_ms, collect available output without waiting for exit.',
+				'Omit to keep the policy. "none" disarms a pending wake. "wake" arms a live session.',
 			)),
 		}),
 		async execute(toolCallId, params, signal, onUpdate, eventCtx) {

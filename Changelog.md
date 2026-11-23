@@ -4,6 +4,7 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Shorten the `write_stdin` `on_exit` parameter description.
 - Remove `effective_wait_ms` from `write_stdin` results. Use `wall_time_seconds` for the call's duration.
 - Put the `[pi-unified-exec]` metadata notice and output collection instructions at the top of exit notifications. Label session lifetime `total_time` and simplify the closing instruction.
 - Merge `set_on_exit` into `write_stdin`. Pass a session ID and `on_exit` to apply the policy and collect available command output without waiting for exit. If the session has already exited, return its exit status and final output even when a new wake can no longer be armed.
