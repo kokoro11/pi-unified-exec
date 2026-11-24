@@ -56,7 +56,10 @@ describe("bounded tool results", () => {
 	});
 
 	it("bounds kill output and puts the recovery marker in model-visible text", () => {
-		const raw = Array.from({ length: DEFAULT_MAX_LINES + 1000 }, (_, index) => `line-${index + 1}`).join("\n");
+		// Enough short lines to exceed either cap, whichever the host Pi exports first.
+		const raw = Array.from({ length: Math.ceil((DEFAULT_MAX_BYTES * 1.2) / 10) }, (_, index) => `line-${index + 1}`).join(
+			"\n",
+		);
 		const details = finalizeKillResult({
 			wallTimeSec: 0.5,
 			totalTimeSec: 1.5,
@@ -81,7 +84,10 @@ describe("bounded tool results", () => {
 		assert.equal(details.total_time_seconds, 1.5);
 		assert.ok(Buffer.byteLength(details.output, "utf8") <= DEFAULT_MAX_BYTES);
 		assert.equal(details.truncation?.truncated, true);
-		assert.equal(details.truncation?.outputLines, DEFAULT_MAX_LINES);
+		assert.ok((details.truncation?.outputLines ?? 0) <= DEFAULT_MAX_LINES);
+		if (details.truncation?.truncatedBy === "lines") {
+			assert.equal(details.truncation.outputLines, DEFAULT_MAX_LINES);
+		}
 		assert.equal(Object.hasOwn(details, "final_output"), false);
 
 		const text = renderKillResultText(details);

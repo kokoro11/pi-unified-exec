@@ -11,12 +11,13 @@ import { strict as assert } from "node:assert";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "bun:test";
-import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@earendil-works/pi-coding-agent";
 import { MAX_YIELD_ENV_VAR } from "../src/time.ts";
 import { OUTPUT_LOG_DIRECTORY } from "../src/output-log.ts";
 import { DEFAULT_STREAM_TAIL_BYTES } from "../src/session.ts";
 import { IS_WINDOWS } from "../src/shell.ts";
 import { activateProcessTools } from "./fixtures/process-tools.ts";
+import { BYTE_CAP_ISOLATED, BYTE_CAP_LINE_WIDTH, BYTE_CAP_LINES, LINE_CAP_ISOLATED, LINE_CAP_LINES } from "./output-bounds.ts";
 
 interface ToolDef {
 	name: string;
@@ -880,22 +881,25 @@ describe("unified-exec e2e", () => {
 		}
 	});
 
-	it("output over 50 KiB is tail-truncated with marker; log file has full bytes", async () => {
+	it.skipIf(!BYTE_CAP_ISOLATED)("output over the byte cap is tail-truncated with marker; log file has full bytes", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
-		// 4000 lines x ~55 bytes = ~210 KiB of output. Well over the 50 KiB cap.
+		const padding = "x".repeat(BYTE_CAP_LINE_WIDTH - 15);
 		const r = await h.call("exec_command", {
-			cmd: "for i in $(seq 1 4000); do echo \"line-number-${i}-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"; done",
+			cmd: `for i in $(seq 1 ${BYTE_CAP_LINES}); do printf 'line-%08d-${padding}\\n' "$i"; done`,
 			yield_time_ms: 10000,
 		});
 		assert.equal(r.details.exit_code, 0);
 
 		// details.output is the truncated body only (no header/footer).
 		const bytes = Buffer.byteLength(r.details.output, "utf8");
-		assert.ok(bytes <= 60 * 1024, `LLM-visible output should be <=60KB; got ${bytes}`);
-		assert.ok(bytes > 40 * 1024, `LLM-visible output should be close to 50KiB; got ${bytes}`);
+		assert.ok(bytes <= DEFAULT_MAX_BYTES, `LLM-visible output should be <=${DEFAULT_MAX_BYTES}B; got ${bytes}`);
+		assert.ok(
+			bytes > DEFAULT_MAX_BYTES - 2 * BYTE_CAP_LINE_WIDTH,
+			`LLM-visible output should be close to ${DEFAULT_MAX_BYTES}B; got ${bytes}`,
+		);
 		assert.equal(r.details.truncation.truncatedBy, "bytes");
-		assert.equal(r.details.truncation.totalLines, 4000); // trailing \n does not count an empty line (pi >= 0.80)
+		assert.equal(r.details.truncation.totalLines, BYTE_CAP_LINES); // trailing \n does not count an empty line (pi >= 0.80)
 
 		// The rendered text (what actually goes to the LLM) includes the marker.
 		const rendered = r.content[0].text;
@@ -908,26 +912,26 @@ describe("unified-exec e2e", () => {
 		let logContent = "";
 		assert.ok(await waitFor(() => {
 			logContent = readFileSync(path, "utf8");
-			return /\nline-number-4000-x+\r?\n/.test(logContent);
+			return new RegExp(`\\nline-${String(BYTE_CAP_LINES).padStart(8, "0")}-x+\\r?\\n`).test(logContent);
 		}), "the final line never reached the log");
 		const logLines = logContent.split("\n").filter(Boolean);
-		assert.equal(logLines.length, 4000);
+		assert.equal(logLines.length, BYTE_CAP_LINES);
 		await h.emit("session_shutdown");
 	});
 
-	it("output over 2000 lines is line-truncated with marker", async () => {
+	it.skipIf(!LINE_CAP_ISOLATED)("output over the line cap is line-truncated with marker", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
-		// 2500 short lines, well under 50 KiB total → line-cap wins.
+		// Short lines stay well under the byte budget, so only the line cap can trip.
 		const r = await h.call("exec_command", {
-			cmd: "for i in $(seq 1 2500); do echo $i; done",
+			cmd: `for i in $(seq 1 ${LINE_CAP_LINES}); do echo $i; done`,
 			yield_time_ms: 10000,
 		});
 		assert.equal(r.details.exit_code, 0);
 		assert.ok(r.details.truncation, `expected truncation metadata`);
 		assert.equal(r.details.truncation.truncatedBy, "lines");
-		assert.equal(r.details.truncation.outputLines, 2000);
-		assert.equal(r.details.truncation.totalLines, 2500); // trailing \n does not count an empty line (pi >= 0.80)
+		assert.equal(r.details.truncation.outputLines, DEFAULT_MAX_LINES);
+		assert.equal(r.details.truncation.totalLines, LINE_CAP_LINES); // trailing \n does not count an empty line (pi >= 0.80)
 		// Marker lives in the rendered content text, not in details.output.
 		assert.ok(r.content[0].text.includes("Showing lines"));
 		await h.emit("session_shutdown");

@@ -18,7 +18,8 @@
  *   - Sessions are terminated on session_shutdown (codex parity).
  *   - Once a session produces 512 bytes, its complete output is archived in
  *     the starting directory's .temp/pi-unified-exec/ folder. The LLM sees
- *     the last ~50 KiB / 2000 lines per call and a log number for recovery.
+ *     the host Pi's `DEFAULT_MAX_BYTES` / `DEFAULT_MAX_LINES` tail per call and a
+ *     log number for recovery.
  */
 
 import { constants as osConstants } from "node:os";

@@ -108,7 +108,7 @@ interface FinalizeKillInput extends OutputResultInput {
 }
 
 export function safeMeta(value: string, max = 4096): string {
-	// Metadata sits outside the 50 KiB child-output body. Bound both the scan and
+	// Metadata sits outside the byte-bounded child-output body. Bound both the scan and
 	// rendered value so a malformed path/error cannot recreate an oversized
 	// result through a header field.
 	const scanLimit = max * 8;
