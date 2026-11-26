@@ -45,7 +45,7 @@ See the [tool reference](docs/TOOLS.md) for parameters, output logs, waits, conf
 
 - Commands run with Pi's permissions. The extension adds no sandbox or approval layer.
 - Sessions end with the Pi session. PTY dimensions are fixed when a process starts.
-- Replies show bounded output. Raw logs, when created, stay on disk until you clean them up.
+- Replies show bounded output. Plain-text logs, when created, stay on disk until you clean them up.
 
 ## Development and license
 

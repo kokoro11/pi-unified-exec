@@ -856,12 +856,12 @@ describe("unified-exec e2e", () => {
 		});
 	}
 
-	it("archives the full stream when output crosses 512 bytes across tool calls", async () => {
+	it("archives clean output when the stream crosses 512 bytes across tool calls", async () => {
 		const h = makeHarness();
 		await h.emit("session_start");
 		try {
 			const started = await h.call("exec_command", {
-				cmd: `node -e 'process.stdout.write("a".repeat(511)); process.stdin.once("data", () => process.stdout.write("b", () => process.exit(0)));'`,
+				cmd: `node -e 'process.stdout.write("a".repeat(511)); process.stdin.once("data", () => process.stdout.write("\\x1b[31mb\\x1b[0m", () => process.exit(0)));'`,
 				yield_time_ms: 2000,
 			});
 			assert.equal(started.details.output, "a".repeat(511));

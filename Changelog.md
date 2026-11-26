@@ -4,6 +4,7 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Strip terminal control sequences from archived output, even when a sequence spans multiple writes. Logs keep printable UTF-8 text, tabs, and newlines from the entire command output.
 - Size the truncation test fixtures from Pi's `DEFAULT_MAX_BYTES` and `DEFAULT_MAX_LINES` instead of fixed numbers, so a Pi release with different defaults stays qualified.
 - Format `list_sessions` replies as counts followed by one Codemode-compatible JSON object per line. Show counts next to the title and leave one blank line before any muted rows of session IDs, PIDs, states, and commands.
 - Remind agents to collect all pending session output when a new uncollected exit appears. Keep exited sessions available after `list_sessions` and after opening the session picker.

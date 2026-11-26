@@ -1,5 +1,8 @@
+/** Archive complete, terminal-safe command output once the raw byte threshold is reached. */
 import { createWriteStream, mkdirSync, openSync, readdirSync, type WriteStream } from "node:fs";
 import { join, resolve } from "node:path";
+
+import { OutputTextSanitizer } from "./output-safety.ts";
 
 export const MIN_LOG_BYTES = 512;
 const LOG_DIRECTORY = ".temp/pi-unified-exec";
@@ -45,10 +48,20 @@ export class OutputLogDirectory {
 
 const defaultDirectory = new OutputLogDirectory(OUTPUT_LOG_DIRECTORY);
 
-/** Keep small output in memory; archive the complete stream once it reaches 512 bytes. */
+interface LogWriter {
+	stream: WriteStream;
+	decoder: TextDecoder;
+	sanitizer: OutputTextSanitizer;
+}
+
+function writeChunk(writer: LogWriter, chunk: Uint8Array): void {
+	const text = writer.sanitizer.write(writer.decoder.decode(chunk, { stream: true }));
+	if (text) writer.stream.write(text);
+}
+
 export class OutputLog {
 	private logId: number | undefined;
-	private stream: WriteStream | undefined;
+	private writer: LogWriter | undefined;
 	private prefix: Uint8Array | undefined;
 	private prefixBytes = 0;
 	private stopped = false;
@@ -64,7 +77,8 @@ export class OutputLog {
 
 	write(chunk: Uint8Array): void {
 		if (this.stopped || chunk.length === 0) return;
-		if (!this.stream) {
+		let writer = this.writer;
+		if (!writer) {
 			if (this.prefixBytes + chunk.length < MIN_LOG_BYTES) {
 				this.prefix ??= new Uint8Array(MIN_LOG_BYTES);
 				this.prefix.set(chunk, this.prefixBytes);
@@ -73,7 +87,11 @@ export class OutputLog {
 			}
 			try {
 				const { id, stream } = this.directory.open();
-				this.stream = stream;
+				this.writer = writer = {
+					stream,
+					decoder: new TextDecoder("utf-8", { ignoreBOM: true }),
+					sanitizer: new OutputTextSanitizer(),
+				};
 				this.logId = id;
 			} catch (error) {
 				this.stopped = true;
@@ -81,27 +99,27 @@ export class OutputLog {
 				this.onFailure(`failed to open log file: ${error instanceof Error ? error.message : String(error)}`);
 				return;
 			}
-			this.stream.on("error", (error) => {
+			writer.stream.on("error", (error) => {
 				this.stopped = true;
-				this.stream = undefined;
+				this.writer = undefined;
 				this.onFailure(`log stream error: ${error.message}`);
 			});
-			if (this.prefixBytes) this.stream.write(this.prefix!.subarray(0, this.prefixBytes));
+			if (this.prefixBytes) writeChunk(writer, this.prefix!.subarray(0, this.prefixBytes));
 			this.prefix = undefined;
 		}
-		this.stream.write(chunk);
+		writeChunk(writer, chunk);
 	}
 
 	close(onClosed: () => void): void {
 		this.stopped = true;
 		this.prefix = undefined;
-		const stream = this.stream;
-		this.stream = undefined;
-		if (!stream) {
+		const writer = this.writer;
+		this.writer = undefined;
+		if (!writer) {
 			onClosed();
 			return;
 		}
-		stream.once("close", onClosed);
-		stream.end();
+		writer.stream.once("close", onClosed);
+		writer.stream.end(writer.sanitizer.write(writer.decoder.decode()));
 	}
 }

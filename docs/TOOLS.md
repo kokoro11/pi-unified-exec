@@ -67,7 +67,7 @@ Text durations use whole milliseconds below 1s, up to four significant digits be
 
 `exec_command`, `write_stdin`, and `kill_session` include the output collected by that call. When there is no output to show, the text says `(no output)` and Codemode's `details.output` is an empty string. Results show up to 50 KiB or 2,000 lines of terminal-safe text. More than 1 MiB of output between drains can also leave a gap in the in-memory buffer. Expand a collapsed result with Pi's `app.tools.expand` binding (Ctrl+O by default) to see the full **bounded** result.
 
-At 512 cumulative raw bytes, the extension starts archiving the full stream, including the initial bytes. Both `log: 4` in the tool reply and `log=4` in the terminal preview point to `.temp/pi-unified-exec/4.log` under **Pi's starting directory**, even if the command uses another `workdir`. Smaller output stays inline. Raw logs can contain terminal control sequences; open them with a plain-text reader or hex viewer.
+At 512 cumulative raw bytes, the extension starts archiving the full output as UTF-8 text, including the output before that threshold. Logs strip terminal control sequences and preserve printable text, tabs, and newlines. Both `log: 4` in the tool reply and `log=4` in the terminal preview point to `.temp/pi-unified-exec/4.log` under **Pi's starting directory**, even if the command uses another `workdir`. Smaller output stays inline.
 
 ## Codemode
 

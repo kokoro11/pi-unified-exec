@@ -51,7 +51,7 @@ On Windows, a Node/Bun launcher waits on a private pipe until `@seydx/win-job` a
 
 ## Output and rendering
 
-- Enforce bounds and strip terminal controls before output reaches model text, tool details, or streaming updates. Pi can fall back to raw result content when custom rendering fails. Keep raw bytes in the archive only; bound metadata independently of the output body.
-- At the archive threshold, write the buffered prefix as well as subsequent bytes. Reserve archive numbers exclusively so simultaneous Pi processes never overwrite each other's logs. Recovery uses the log number; expansion displays the bounded output without reading an arbitrary log file.
+- Enforce bounds and strip terminal controls before output reaches model text, tool details, or streaming updates. Pi can fall back to raw result content when custom rendering fails. Bound metadata independently of the output body.
+- At the raw-byte archive threshold, decode and sanitize the buffered prefix and all subsequent chunks as one UTF-8 stream. Carry incomplete characters and control sequences across writes. Reserve archive numbers exclusively so simultaneous Pi processes never overwrite each other's logs. Recovery uses the log number; expansion displays the bounded output without reading an arbitrary log file.
 - Use Pi's configured expansion key and count visual rows after wrapping. In Codemode, preserve the public native factory and replace only result rendering. Register at `session_start` to let the built-in load without conflict warnings. Unwrap `lastComponent` before delegating to the native renderer and preserve the expansion hint and recovery footer.
 - On Pi upgrades, check factory and schema identity, activation (including MCP), mode and budget, store/load, model helpers, and cached renderer reuse. Run the Codemode unit/CLI tests and `bun run test:tui`. A fallback to generic rendering fails qualification.

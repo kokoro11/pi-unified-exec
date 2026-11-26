@@ -1,3 +1,4 @@
+/** Verify log threshold, streaming text cleanup, and exclusive file numbering. */
 import { strict as assert } from "node:assert";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -54,6 +55,26 @@ describe("output log threshold", () => {
 		log.write(encoder.encode("tail"));
 		await close(log);
 		assert.equal(readFileSync(join(path, "1.log"), "utf8"), "a".repeat(200) + "b".repeat(311) + "ctail");
+	});
+
+	it("strips controls split across the archive threshold and later writes", async () => {
+		const log = new OutputLog(fail, directory);
+		const prefix = "a".repeat(510);
+		log.write(encoder.encode(prefix + "\x1b"));
+		assert.equal(log.id, undefined);
+		log.write(encoder.encode("["));
+		assert.equal(log.id, 1);
+
+		log.write(encoder.encode("31mred\x1b[0m\t\x1b]0;hidden title"));
+		log.write(encoder.encode("\x1b"));
+		log.write(encoder.encode("\\\r\n"));
+		const emoji = encoder.encode("🎉");
+		log.write(emoji.subarray(0, 2));
+		log.write(emoji.subarray(2));
+		log.write(encoder.encode("\x07\x1bPunterminated payload"));
+		await close(log);
+
+		assert.equal(readFileSync(join(path, "1.log"), "utf8"), prefix + "red\t\n🎉");
 	});
 
 	it("continues after existing logs and skips numbers taken by another writer", async () => {
