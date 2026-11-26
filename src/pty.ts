@@ -14,6 +14,9 @@ import { constants as osConstants } from "node:os";
 import { IS_WINDOWS, resolveBinary } from "./shell.ts";
 import { WindowsJob } from "./windows-job.ts";
 
+export const DEFAULT_PTY_COLS = 120;
+export const DEFAULT_PTY_ROWS = 30;
+
 export interface SpawnOptions {
 	command: string[];
 	cwd: string;
@@ -189,8 +192,8 @@ function spawnPty(mod: PtyModule, opts: SpawnOptions): SpawnedChild {
 		child = mod.spawn(file, args, {
 			cwd: opts.cwd,
 			env: opts.env,
-			cols: opts.cols ?? 120,
-			rows: opts.rows ?? 30,
+			cols: opts.cols ?? DEFAULT_PTY_COLS,
+			rows: opts.rows ?? DEFAULT_PTY_ROWS,
 			name: "xterm-256color",
 		});
 	} catch (error) {

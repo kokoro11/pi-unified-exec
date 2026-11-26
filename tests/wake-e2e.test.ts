@@ -10,6 +10,7 @@
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, it } from "bun:test";
 import { OUTPUT_LOG_DIRECTORY } from "../src/output-log.ts";
 import { activateProcessTools } from "./fixtures/process-tools.ts";
@@ -162,7 +163,7 @@ describe("write_stdin attached waits", () => {
 		assert.equal(Object.hasOwn(r2.details, "wait_status"), false);
 		assert.equal(Object.hasOwn(r2.structuredContent.details, "wait_status"), false);
 		assert.ok(r2.details.omitted_bytes > 1024 * 1024, "must retain head/tail, not accumulate every drained chunk");
-		assert.ok(Buffer.byteLength(r2.details.output) <= 50 * 1024);
+		assert.ok(Buffer.byteLength(r2.details.output) <= DEFAULT_MAX_BYTES);
 		assert.match(r2.details.output, /noisy-done/);
 		assert.ok(readFileSync(join(OUTPUT_LOG_DIRECTORY, `${r2.details.log}.log`)).length > 3 * 1024 * 1024);
 		assert.ok(updates.length <= 3, `long waits must not heartbeat: ${updates.length} updates`);

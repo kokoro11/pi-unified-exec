@@ -1,13 +1,10 @@
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@earendil-works/pi-coding-agent";
-
 /**
  * Fixture sizes for the truncation tests.
  *
- * The extension keeps Pi's exported bounds instead of its own numbers, and
- * releases differ: Pi 1.0.0 exports 50 KiB and 2,000 lines, Pi 1.6.0 exports
- * 200,000 bytes and 200,000 lines. Fixtures are therefore derived from those
- * constants, and a test skips when its cap cannot be isolated.
+ * Derive fixtures from Pi's DEFAULT_MAX_BYTES and DEFAULT_MAX_LINES, which
+ * can vary by release. Skip a test if its cap cannot be exercised in isolation.
  */
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@earendil-works/pi-coding-agent";
 
 /** `line-00000001-` plus 50 `x` characters and the newline. */
 export const BYTE_CAP_LINE_WIDTH = 65;

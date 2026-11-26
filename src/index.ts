@@ -18,8 +18,8 @@
  *   - Sessions are terminated on session_shutdown (codex parity).
  *   - Once a session produces 512 bytes, its complete output is archived in
  *     the starting directory's .temp/pi-unified-exec/ folder. The LLM sees
- *     the host Pi's `DEFAULT_MAX_BYTES` / `DEFAULT_MAX_LINES` tail per call and a
- *     log number for recovery.
+ *     bounded output per call (new pipe output or the current TTY screen) and
+ *     a log number for recovery.
  */
 
 import { constants as osConstants } from "node:os";
@@ -32,7 +32,7 @@ import { CompletionCoordinator, type OnExitPolicy, type OnExitStatus } from "./c
 import { type LongWaitOutcome, startRateLimitedStream, waitForExitOrDeadline } from "./long-wait.ts";
 import { OUTPUT_LOG_PATH_TEMPLATE } from "./output-log.ts";
 import { sanitizeOutputText } from "./output-safety.ts";
-import { getPtyLoadError, isPtyAvailable } from "./pty.ts";
+import { DEFAULT_PTY_COLS, DEFAULT_PTY_ROWS, getPtyLoadError, isPtyAvailable } from "./pty.ts";
 import {
 	renderExecCommandCall,
 	renderKillSessionCall,
@@ -67,6 +67,7 @@ import { buildShellCommand, IS_WINDOWS, resolveDefaultShell, resolveWindowsShell
 import { DEFAULT_INPUT_YIELD_MS, DEFAULT_YIELD_MS, MAX_YIELD_ENV_VAR, resolveYieldTimeMs } from "./time.ts";
 export { MAX_YIELD_ENV_VAR, resolveMaxYieldMs } from "./time.ts";
 import {
+	boundOutputText,
 	finalizeKillResult,
 	finalizeProcessResult,
 	finalizeSessionResult,
@@ -663,7 +664,10 @@ function buildStreamUpdate(
 	onExit: ProcessResultDetails["on_exit"],
 	yieldTimeMs?: number,
 ): AgentToolResult<ProcessUpdateDetails> {
-	const tailText = sanitizeOutputText(textDecoder.decode(session.snapshotStreamTail()));
+	const screen = session.snapshotScreen();
+	const output = screen === undefined
+		? sanitizeOutputText(textDecoder.decode(session.snapshotStreamTail()))
+		: boundOutputText(screen).content;
 	const details: ProcessUpdateDetails = {
 		session_id: session.id,
 		pid: session.pid,
@@ -673,12 +677,12 @@ function buildStreamUpdate(
 		command: session.displayCommand,
 		cwd: session.cwd,
 		log: session.log,
-		output: tailText,
+		output,
 	};
 	if (onExit) details.on_exit = onExit;
 	if (yieldTimeMs !== undefined) details.yield_time_ms = yieldTimeMs;
 	return {
-		content: [{ type: "text", text: tailText }],
+		content: [{ type: "text", text: output }],
 		details,
 	};
 }
@@ -913,15 +917,15 @@ export default function (pi: ExtensionAPI) {
 					description: "Shell binary to run the command. Default is bash. On Windows you can also use cmd, powershell or pwsh.",
 				}),
 			),
-			tty: Type.Optional(Type.Boolean({ description: "Allocate a PTY. Default false (plain pipes)." })),
+			tty: Type.Optional(Type.Boolean({ description: "Allocate a terminal and return its current visible screen. Default false (plain pipes)." })),
 			cols: Type.Optional(
 				Type.Number({
-					description: `PTY width in columns (tty: true only; ignored for pipes). Default 120, clamped to [${MIN_PTY_COLS}, ${MAX_PTY_COLS}].`,
+					description: `PTY width in columns (tty: true only; ignored for pipes). Default ${DEFAULT_PTY_COLS}, clamped to [${MIN_PTY_COLS}, ${MAX_PTY_COLS}].`,
 				}),
 			),
 			rows: Type.Optional(
 				Type.Number({
-					description: `PTY height in rows (tty: true only; ignored for pipes). Default 30, clamped to [${MIN_PTY_ROWS}, ${MAX_PTY_ROWS}].`,
+					description: `PTY height in rows (tty: true only; ignored for pipes). Default ${DEFAULT_PTY_ROWS}, clamped to [${MIN_PTY_ROWS}, ${MAX_PTY_ROWS}].`,
 				}),
 			),
 			yield_time_ms: Type.Optional(
@@ -959,6 +963,7 @@ export default function (pi: ExtensionAPI) {
 			"write_stdin: Don't poll again after collecting a session's final output. You can still collect an exit shown by list_sessions.",
 			'write_stdin: Only set on_exit to "wake" when the human asks for auto-resume. To disarm a pending wake promptly, use on_exit: "none" with just the session ID. An exit collected by a poll consumes its wake.',
 			"write_stdin: In tty sessions, submit lines with \\r (the Enter key) rather than \\n: POSIX terminals accept both, but Windows console programs only execute input on \\r.",
+			"write_stdin: In tty sessions, each reply shows the current visible screen. Read it as a snapshot; do not append it to earlier replies.",
 			"exec_command, write_stdin: For very noisy jobs, rely on the log and final/truncated output instead of repeatedly polling.",
 			"exec_command, write_stdin, kill_session: In codemode, results are { details, text }. Use r.details only when you need structured data. In most cases just call text(r.text) to display the formatted reply. NEVER just text(r): output gets repeated.",
 			`exec_command, write_stdin, kill_session, list_sessions: If the tool output contains a log number, you can read ${OUTPUT_LOG_PATH_TEMPLATE} under Pi's cwd for the full command output.`,
@@ -1041,6 +1046,7 @@ export default function (pi: ExtensionAPI) {
 			const details = finalizeKillResult({
 				wallTimeSec: (Date.now() - startedAt) / 1000,
 				collected: collected.bytes,
+				screen: session.snapshotScreen(),
 				omittedBytes: collected.omittedBytes,
 				sessionId: sid,
 				totalTimeSec: session.totalTimeSeconds,

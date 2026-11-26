@@ -35,8 +35,8 @@ function omissionMarker(omittedBytes: number, retentionBytes: number): Uint8Arra
 }
 
 export interface CollectInputs {
-	/** Buffer to drain. Chunks removed from it are returned to the caller. */
-	buffer: HeadTailBuffer;
+	/** Pipe buffer to drain. PTYs retain a screen instead and only use the wait. */
+	buffer?: HeadTailBuffer;
 	/** Fired when new data arrives in `buffer`. */
 	outputNotify: Notify;
 	/** Closed when the underlying stream ends (process exit + streams drained). */
@@ -75,6 +75,10 @@ export interface CollectResult {
 export async function collectOutputUntilDeadline(inputs: CollectInputs): Promise<CollectResult> {
 	const { buffer, outputNotify, outputClosed, exited, deadlineMs, externalAbort, stopSignal } = inputs;
 	const postExitCloseWaitCap = inputs.postExitCloseWaitMs ?? POST_EXIT_CLOSE_WAIT_MS;
+	// Screen changes drive streaming previews, but this wait only needs to
+	// wake for individual output chunks when there are pipe bytes to drain.
+	const noPipeOutput = buffer ? undefined : new Promise<never>(() => {});
+	const nextOutput = () => noPipeOutput ?? outputNotify.notified().then(() => "output" as const);
 
 	const collected: Uint8Array[] = [];
 	let omittedTotal = 0;
@@ -107,10 +111,11 @@ export async function collectOutputUntilDeadline(inputs: CollectInputs): Promise
 			if (externalAbort?.aborted) break;
 
 			// 1) Drain whatever is currently buffered.
-			const drained = buffer.drainSegments();
-			const drainedCount = drained.head.length + drained.tail.length;
+			const drained = buffer?.drainSegments();
 
-			if (drainedCount === 0 && drained.omittedBytes === 0) {
+			if (!buffer || !drained || (
+				drained.head.length === 0 && drained.tail.length === 0 && drained.omittedBytes === 0
+			)) {
 				if (exited.aborted) exitSignalReceived = true;
 				if (exitSignalReceived && outputClosed.isClosed) break;
 
@@ -126,7 +131,7 @@ export async function collectOutputUntilDeadline(inputs: CollectInputs): Promise
 					if (Date.now() >= postExitDeadline) break;
 					closedP ??= outputClosed.closed().then(() => "closed" as const);
 					const which = await Promise.race([
-						outputNotify.notified().then(() => "output" as const),
+						nextOutput(),
 						closedP,
 						graceP!,
 						externalP,
@@ -137,7 +142,7 @@ export async function collectOutputUntilDeadline(inputs: CollectInputs): Promise
 
 				// Still running — wait for next event.
 				const which = await Promise.race([
-					outputNotify.notified().then(() => "output" as const),
+					nextOutput(),
 					exitedP,
 					deadlineP,
 					stopP,

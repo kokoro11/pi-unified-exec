@@ -2,7 +2,7 @@
  * Script-facing results for Pi codemode.
  *
  * For exec_command, write_stdin, and kill_session, `text` is the formatted tool reply and
- * `details` holds typed state and the bounded, sanitized output tail.
+ * `details` holds typed state and bounded pipe output or the current TTY screen.
  */
 
 import { Type, type Static } from "typebox";
@@ -36,7 +36,7 @@ const onExitSchema = Type.Optional(Type.Union([Type.Literal("wake"), Type.Litera
 
 const outputFields = {
 	output: Type.String({
-		description: "Bounded, terminal-safe tail of the child output with real newlines.",
+		description: "Terminal-safe text with real newlines: bounded new pipe output or the current visible TTY screen.",
 	}),
 	truncated: Type.Boolean({ description: "True when earlier output was dropped; the full stream is in log." }),
 	omitted_bytes: Type.Optional(Type.Number({ description: "Middle bytes dropped by the in-memory retention cap." })),

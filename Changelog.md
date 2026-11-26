@@ -4,8 +4,9 @@ All notable changes to this project. **Newest entries go on top.**
 
 ## Unreleased
 
+- Return the current visible screen from TTY sessions on launch, input, polling, and termination. Line edits and redraws update in place, so interactive prompts such as Python's REPL stay readable.
 - Strip terminal control sequences from archived output, even when a sequence spans multiple writes. Logs keep printable UTF-8 text, tabs, and newlines from the entire command output.
-- Size the truncation test fixtures from Pi's `DEFAULT_MAX_BYTES` and `DEFAULT_MAX_LINES` instead of fixed numbers, so a Pi release with different defaults stays qualified.
+- Refer to the installed Pi version's `DEFAULT_MAX_BYTES` and `DEFAULT_MAX_LINES` for output limits in the tool reference, and use those constants in truncation tests.
 - Format `list_sessions` replies as counts followed by one Codemode-compatible JSON object per line. Show counts next to the title and leave one blank line before any muted rows of session IDs, PIDs, states, and commands.
 - Remind agents to collect all pending session output when a new uncollected exit appears. Keep exited sessions available after `list_sessions` and after opening the session picker.
 - Replace `write_stdin`'s `chars_b64` with `chars_hex`. Accept mixed-case hex and ignore whitespace; reject invalid digits or incomplete bytes without writing or polling.
@@ -162,8 +163,8 @@ All notable changes to this project. **Newest entries go on top.**
 
 - **`kill_session` output is now bounded before it reaches either the model or
   the TUI.** The tool previously appended its complete retained drain directly
-  to `content` and `details.final_output`, bypassing the normal 50 KiB / 2000
-  line cap (up to the 1 MiB in-memory retention) and Pi's collapse state. Kill
+  to `content` and `details.final_output`, bypassing the normal `DEFAULT_MAX_BYTES`
+  and `DEFAULT_MAX_LINES` limits (up to the 1 MiB in-memory retention) and Pi's collapse state. Kill
   results now use the same tail truncation, omission metadata, recovery marker,
   token/byte metrics, and `log_path` contract as exec/write results.
 - **Every unified-exec tool now has an explicit call and result renderer.**

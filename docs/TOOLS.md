@@ -11,7 +11,7 @@ Starts a process and waits for an initial result. A process that finishes during
 | `cmd` | Required | Shell command to run. |
 | `workdir` | Pi's working directory | Working directory for the child. |
 | `shell` | Bash; PowerShell fallback on Windows | Shell executable. Windows also supports explicit `cmd`, `powershell`, or `pwsh`. |
-| `tty` | `false` | Set to `true` for a terminal. Use pipes for programs that only need stdin and output. |
+| `tty` | `false` | Set to `true` for a terminal and its current screen. Use pipes for programs that only need stdin and output. |
 | `cols`, `rows` | `120`, `30` | Initial terminal size; clamped to 20–500 columns and 5–300 rows. Ignored in pipe mode. |
 | `yield_time_ms` | `10000` | How long the call stays attached. `0` starts the command without waiting. |
 | `on_exit` | `"none"` | Use `"wake"` only when the human requests automatic resumption after an unobserved exit. |
@@ -65,13 +65,17 @@ Tool replies and Codemode details report `on_exit: "wake"` while a wake is activ
 
 Text durations use whole milliseconds below 1s, up to four significant digits below 1000s, and whole seconds from 1000s. Terminal previews, wait labels, widgets, pickers, and wake messages share this format. Session listings and script details retain their numeric units.
 
-`exec_command`, `write_stdin`, and `kill_session` include the output collected by that call. When there is no output to show, the text says `(no output)` and Codemode's `details.output` is an empty string. Results show up to 50 KiB or 2,000 lines of terminal-safe text. More than 1 MiB of output between drains can also leave a gap in the in-memory buffer. Expand a collapsed result with Pi's `app.tools.expand` binding (Ctrl+O by default) to see the full **bounded** result.
+In pipe mode, `exec_command`, `write_stdin`, and `kill_session` return the output collected by that call. More than 1 MiB of output between drains can leave a gap in the in-memory buffer.
+
+In TTY mode, each reply shows the current visible screen, even on an idle poll. Cursor movement, erasing, and scrolling update the screen in place. Read each reply as a fresh snapshot; don't append it to earlier replies. The snapshot uses the session's `cols` and `rows`, omits unused space at the right and bottom, and excludes scrollback.
+
+Both modes limit terminal-safe text to the installed Pi version's `DEFAULT_MAX_BYTES` and `DEFAULT_MAX_LINES`. An empty result says `(no output)` and Codemode's `details.output` is empty. Expand a collapsed result with Pi's `app.tools.expand` binding (Ctrl+O by default) to see the full **bounded** result.
 
 At 512 cumulative raw bytes, the extension starts archiving the full output as UTF-8 text, including the output before that threshold. Logs strip terminal control sequences and preserve printable text, tabs, and newlines. Both `log: 4` in the tool reply and `log=4` in the terminal preview point to `.temp/pi-unified-exec/4.log` under **Pi's starting directory**, even if the command uses another `workdir`. Smaller output stays inline.
 
 ## Codemode
 
-`exec_command`, `write_stdin`, and `kill_session` return `{ details, text }` inside Codemode. `exec_command` includes `details.session_id` when the command is still running. `write_stdin` always includes `details.session_id` and `details.total_time_seconds`, even when it reports an exit. The total stops at exit. `details.output` is the bounded text; `text(r.text)` prints the formatted reply with line breaks.
+`exec_command`, `write_stdin`, and `kill_session` return `{ details, text }` inside Codemode. `exec_command` includes `details.session_id` when the command is still running. `write_stdin` always includes `details.session_id` and `details.total_time_seconds`, even when it reports an exit. The total stops at exit. `details.output` is the bounded pipe text or TTY screen; `text(r.text)` prints the formatted reply with line breaks.
 
 ```js
 const r = await tools.exec_command({ cmd: "git status --short" });

@@ -1,3 +1,4 @@
+/** Format bounded, terminal-safe output and session metadata for tool replies. */
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -34,7 +35,7 @@ export interface OutputResultDetails {
 	wall_time_seconds: number;
 	/** Session lifetime in seconds, frozen at exit when reported. */
 	total_time_seconds?: number;
-	/** Bounded, terminal-inert tail sent to the model and used by the TUI renderer. */
+	/** Bounded pipe output or the current TTY viewport, safe to display as text. */
 	output: string;
 	session_id?: number;
 	exit_code?: number;
@@ -76,6 +77,7 @@ export interface KillResultDetails extends OutputResultDetails {
 interface OutputResultInput {
 	wallTimeSec: number;
 	collected: Uint8Array;
+	screen?: string;
 	log?: number;
 	/** Middle bytes dropped by the retention cap during this call's drain. */
 	omittedBytes?: number;
@@ -122,9 +124,12 @@ export function safeMeta(value: string, max = 4096): string {
 
 type OutputEnvelope = Pick<OutputResultDetails, "wall_time_seconds" | "output" | "log" | "truncation" | "omitted_bytes">;
 
+export function boundOutputText(text: string): TruncationResult {
+	return truncateTail(sanitizeOutputText(text), { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
+}
+
 function createOutputEnvelope(input: OutputResultInput): OutputEnvelope {
-	const safeText = sanitizeOutputText(textDecoder.decode(input.collected));
-	const truncation = truncateTail(safeText, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
+	const truncation = boundOutputText(input.screen ?? textDecoder.decode(input.collected));
 	const envelope: OutputEnvelope = {
 		wall_time_seconds: input.wallTimeSec,
 		output: truncation.content,
@@ -174,6 +179,7 @@ export function finalizeSessionResult(
 		running,
 		wallTimeSec,
 		collected: collected.bytes,
+		screen: session.snapshotScreen(),
 		omittedBytes: collected.omittedBytes,
 		sessionId: running || operation === "write_stdin" ? session.id : undefined,
 		exitCode: running ? undefined : session.exitCode,

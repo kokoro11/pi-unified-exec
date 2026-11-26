@@ -1,7 +1,6 @@
 /**
  * ExecSession — wraps a SpawnedChild with:
- *   - a head+tail output buffer (drained by polls)
- *   - a rolling tail window (for TUI streaming via onUpdate)
+ *   - a terminal screen, or pipe buffers drained by polls and streamed to the TUI
  *   - state transitions (has_exited / exit_code / signal / failure)
  *   - lifecycle callbacks (onData taps, onExit fan-out)
  *
@@ -13,7 +12,8 @@ import { type CollectResult, collectOutputUntilDeadline } from "./collect.ts";
 import { HeadTailBuffer } from "./head-tail-buffer.ts";
 import { Gate, Notify } from "./notify.ts";
 import { OutputLog } from "./output-log.ts";
-import { type SpawnedChild, type SpawnOptions, spawnChild } from "./pty.ts";
+import { DEFAULT_PTY_COLS, DEFAULT_PTY_ROWS, type SpawnedChild, type SpawnOptions, spawnChild } from "./pty.ts";
+import { PtyScreen } from "./pty-screen.ts";
 
 /** Default per-session output retention. */
 export const DEFAULT_HEAD_TAIL_MAX_BYTES = 1024 * 1024; // 1 MiB
@@ -48,8 +48,9 @@ export class ExecSession {
 	}
 
 	/** Head+tail buffer drained by each collectOutputUntilDeadline() call. */
-	private readonly outputBuffer: HeadTailBuffer;
-	/** Fired whenever new data arrives in outputBuffer. */
+	private readonly outputBuffer: HeadTailBuffer | undefined;
+	private screen: PtyScreen | undefined;
+	/** Fired when pipe output arrives or the terminal emulator paints. */
 	readonly outputNotify = new Notify();
 	/** Closed when the stream is done (all data flushed after exit). */
 	private readonly outputClosed = new Gate();
@@ -83,7 +84,7 @@ export class ExecSession {
 		this.tty = opts.tty;
 		this.startedAt = Date.now();
 		this.lastUsedAt = this.startedAt;
-		this.outputBuffer = new HeadTailBuffer(opts.headTailMaxBytes ?? DEFAULT_HEAD_TAIL_MAX_BYTES);
+		if (!opts.tty) this.outputBuffer = new HeadTailBuffer(opts.headTailMaxBytes ?? DEFAULT_HEAD_TAIL_MAX_BYTES);
 		this.streamTailCap = opts.streamTailBytes ?? DEFAULT_STREAM_TAIL_BYTES;
 		this.outputLog = new OutputLog((message) => {
 			this.failure ??= message;
@@ -94,8 +95,17 @@ export class ExecSession {
 		const self = new ExecSession(id, opts);
 
 		try {
+			if (opts.tty) {
+				self.screen = new PtyScreen(
+					opts.cols ?? DEFAULT_PTY_COLS,
+					opts.rows ?? DEFAULT_PTY_ROWS,
+					() => self.outputNotify.notifyAll(),
+					(reply) => self.write(reply),
+				);
+			}
 			self.child = spawnChild(opts);
 		} catch (err: any) {
+			self.screen?.close(() => {});
 			self.recordExit(null, null, err?.message ?? String(err));
 			self.outputClosed.close();
 			return self;
@@ -103,9 +113,17 @@ export class ExecSession {
 
 		self.child.onData((chunk) => {
 			self.totalOutputBytes += chunk.length;
-			self.outputBuffer.pushChunk(chunk);
-			self.appendStreamTail(chunk);
 			self.outputLog.write(chunk);
+			if (self.screen) {
+				try {
+					self.screen.write(chunk);
+				} catch (error) {
+					self.failure ??= `terminal output error: ${error instanceof Error ? error.message : String(error)}`;
+				}
+				return;
+			}
+			self.outputBuffer!.pushChunk(chunk);
+			self.appendStreamTail(chunk);
 			self.outputNotify.notifyAll();
 		});
 
@@ -113,14 +131,17 @@ export class ExecSession {
 			self.recordExit(exitCode, signal, failureMessage);
 			// Fire a notify so any parked waiters wake up and see the exit.
 			self.outputNotify.notifyAll();
-			// A short tick later, flush the log stream to disk, then close the
-			// output gate. The tick lets any pending data-handler chunks land
-			// in the buffer+log before we declare the session fully done.
+			// Allow trailing chunks, then wait for the archive and emulator
+			// before announcing that final output is ready to collect.
 			setImmediate(() => {
 				self.outputNotify.notifyAll();
 				self.outputLog.close(() => {
-					self.outputClosed.close();
-					self.outputNotify.notifyAll();
+					const finish = () => {
+						self.outputClosed.close();
+						self.outputNotify.notifyAll();
+					};
+					if (self.screen) self.screen.close(finish);
+					else finish();
 				});
 			});
 		});
@@ -193,10 +214,14 @@ export class ExecSession {
 		return out;
 	}
 
+	/** Current viewport, or undefined for pipes. Reading it never drains it. */
+	snapshotScreen(): string | undefined {
+		return this.screen?.snapshot();
+	}
+
 	/**
-	 * Drain this session's retained output until `deadlineMs` (or exit/abort).
-	 * Thin wrapper over collectOutputUntilDeadline so call sites don't repeat
-	 * the buffer/notify/gate plumbing.
+	 * Wait until `deadlineMs` (or exit/abort), draining retained pipe output.
+	 * PTY sessions keep the viewport available for `snapshotScreen`.
 	 */
 	collect(opts: {
 		deadlineMs: number;

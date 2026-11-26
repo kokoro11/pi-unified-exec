@@ -82,7 +82,7 @@ describe.skipIf(!isPtyAvailable())("unified-exec PTY mode", () => {
 			let output = r2.details.output as string;
 			for (let i = 0; i < 2 && !output.includes("GOT:hello|"); i++) {
 				const poll = await h.call("write_stdin", { session_id: sid, yield_time_ms: 5000 });
-				output += poll.details.output;
+				output = poll.details.output;
 				if (!poll.details.running) break;
 			}
 			assert.ok(output.includes("GOT:hello|"), `PTY input did not round-trip: ${JSON.stringify(output)}`);
@@ -96,6 +96,33 @@ describe.skipIf(!isPtyAvailable())("unified-exec PTY mode", () => {
 			assert.equal(finished.details.exit_code, 7, `fixture did not exit on quit: ${JSON.stringify(finished.details)}`);
 			assert.equal(finished.details.session_id, sid);
 			assert.ok(finished.content[0].text.startsWith(`[exited #${sid} error 7]\n`));
+		} finally {
+			await h.emit("session_shutdown");
+		}
+	});
+
+	it("returns the whole visible screen after a line redraw and on an idle poll", async () => {
+		const fixture =
+			"node -e 'process.stdin.setRawMode(true);process.stdout.write([1,2,3,4,5,\"banner\",\">>> sample\"].join(\"\\r\\n\"));process.stdin.once(\"data\",()=>process.stdout.write(\"\\r\\x1b[2K>>> done\"));process.stdin.resume()'";
+		const h = makeHarness();
+		await h.emit("session_start");
+		try {
+			const started = await h.call("exec_command", {
+				cmd: fixture, tty: true, cols: 40, rows: 5, yield_time_ms: 1500,
+			});
+			const sid = started.details.session_id;
+			assert.equal(typeof sid, "number");
+			assert.equal(started.details.output, "3\n4\n5\nbanner\n>>> sample");
+
+			const edited = await h.call("write_stdin", { session_id: sid, chars: "x", yield_time_ms: 1000 });
+			assert.equal(edited.details.output, "3\n4\n5\nbanner\n>>> done");
+
+			const idle = await h.call("write_stdin", { session_id: sid, yield_time_ms: 0 });
+			assert.equal(idle.details.output, edited.details.output);
+
+			const killed = await h.call("kill_session", { session_id: sid });
+			assert.equal(killed.details.status, "killed");
+			assert.equal(killed.details.output, edited.details.output);
 		} finally {
 			await h.emit("session_shutdown");
 		}
